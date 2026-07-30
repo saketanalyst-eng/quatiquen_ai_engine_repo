@@ -1,0 +1,90 @@
+{
+  "version": "1.0.0",
+  "templates": [
+    {
+      "id": "rec-001",
+      "category": "vulnerability",
+      "cve_pattern": "CVE-2024-*",
+      "technical_text": "Apply the vendor-supplied security patch immediately. Verify the patch is applied correctly by running a vulnerability scan. If a patch is not available, implement vendor-recommended workarounds.",
+      "estimated_effort": "medium",
+      "estimated_impact": 85
+    },
+    {
+      "id": "rec-002",
+      "category": "vulnerability",
+      "cve_pattern": "CVE-2023-*",
+      "technical_text": "Update the affected software to the latest patched version. Restart the service after the update. Validate that the vulnerability is no longer present using security scanning tools.",
+      "estimated_effort": "medium",
+      "estimated_impact": 75
+    },
+    {
+      "id": "rec-003",
+      "category": "misconfiguration",
+      "technical_text": "Review the configuration settings and apply the recommended secure configuration baseline. Use configuration management tools to enforce the correct settings and prevent drift.",
+      "estimated_effort": "low",
+      "estimated_impact": 60
+    },
+    {
+      "id": "rec-004",
+      "category": "headers",
+      "technical_text": "Add the missing security headers to your web server configuration. Include Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, and Strict-Transport-Security. Test the headers using online header checkers.",
+      "estimated_effort": "low",
+      "estimated_impact": 50
+    },
+    {
+      "id": "rec-005",
+      "category": "outdated",
+      "technical_text": "Upgrade the software to the latest version available. Review the release notes for any breaking changes and test in a staging environment before deploying to production.",
+      "estimated_effort": "high",
+      "estimated_impact": 70
+    },
+    {
+      "id": "rec-006",
+      "category": "general",
+      "technical_text": "Review the finding and assess its relevance. Follow standard security remediation procedures: identify root cause, apply fix, verify resolution, and document the change.",
+      "estimated_effort": "medium",
+      "estimated_impact": 40
+    },
+    {
+      "id": "rec-007",
+      "category": "crypto",
+      "technical_text": "Replace weak cryptographic algorithms with stronger alternatives. Use industry-standard protocols (TLS 1.2+, AES-256, RSA-2048). Rotate any exposed keys or certificates.",
+      "estimated_effort": "high",
+      "estimated_impact": 90
+    },
+    {
+      "id": "rec-008",
+      "category": "credentials",
+      "technical_text": "Revoke the exposed credentials immediately. Generate new strong credentials and rotate them across all affected systems. Implement secret management solutions to prevent future exposure.",
+      "estimated_effort": "critical",
+      "estimated_impact": 95
+    },
+    {
+      "id": "rec-009",
+      "category": "iam",
+      "technical_text": "Review and enforce least privilege access policies. Remove unnecessary permissions and implement role-based access control (RBAC). Audit all IAM configurations regularly.",
+      "estimated_effort": "medium",
+      "estimated_impact": 65
+    },
+    {
+      "id": "rec-010",
+      "category": "data_breach",
+      "technical_text": "Activate incident response procedures. Isolate affected systems, preserve evidence for forensics, notify security team and legal/compliance. Engage external forensic experts if required. Follow breach notification timelines.",
+      "estimated_effort": "critical",
+      "estimated_impact": 100
+    },
+    {
+      "id": "rec-011",
+      "category": "vulnerability",
+      "cve_pattern": "CVE-2022-*",
+      "technical_text": "Apply the security update. If the update is not available, implement network controls such as access restrictions or Web Application Firewall rules to mitigate the risk.",
+      "estimated_effort": "medium",
+      "estimated_impact": 65
+    }
+  ],
+  "fallback": {
+    "technical_text": "Investigate the finding and apply appropriate security controls. Consult the vendor documentation for guidance. If unsure, escalate to the security team.",
+    "estimated_effort": "medium",
+    "estimated_impact": 50
+  }
+}

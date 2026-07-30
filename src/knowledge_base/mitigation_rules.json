@@ -1,0 +1,165 @@
+{
+  "version": "1.0.0",
+  "categories": {
+    "vulnerability": {
+      "description": "Software vulnerabilities (CVE, CVSS)",
+      "mitigations": [
+        "Apply security patches and updates",
+        "Implement vendor workarounds",
+        "Deploy virtual patches (WAF, IPS)",
+        "Limit exposure through network controls",
+        "Harden affected components"
+      ],
+      "time_to_mitigate": {
+        "critical": "24 hours",
+        "high": "72 hours",
+        "medium": "7 days",
+        "low": "30 days"
+      }
+    },
+    "misconfiguration": {
+      "description": "Insecure configuration settings",
+      "mitigations": [
+        "Apply secure configuration baseline",
+        "Use configuration management tools",
+        "Review and update configuration files",
+        "Enable security features (logging, encryption, authentication)",
+        "Disable unnecessary services"
+      ],
+      "time_to_mitigate": {
+        "critical": "12 hours",
+        "high": "48 hours",
+        "medium": "5 days",
+        "low": "14 days"
+      }
+    },
+    "headers": {
+      "description": "Missing or misconfigured security headers",
+      "mitigations": [
+        "Add Content-Security-Policy header",
+        "Add X-Content-Type-Options: nosniff",
+        "Add X-Frame-Options: DENY",
+        "Add Strict-Transport-Security",
+        "Add Referrer-Policy: strict-origin-when-cross-origin"
+      ],
+      "time_to_mitigate": {
+        "critical": "4 hours",
+        "high": "24 hours",
+        "medium": "3 days",
+        "low": "7 days"
+      }
+    },
+    "outdated": {
+      "description": "End-of-life or outdated software",
+      "mitigations": [
+        "Upgrade to a supported version",
+        "Apply security backports",
+        "Consider migration to alternative solutions",
+        "Isolate or decommission unsupported systems",
+        "Enforce strict access controls"
+      ],
+      "time_to_mitigate": {
+        "critical": "7 days",
+        "high": "14 days",
+        "medium": "30 days",
+        "low": "90 days"
+      }
+    },
+    "crypto": {
+      "description": "Weak cryptographic algorithms or protocols",
+      "mitigations": [
+        "Replace with strong encryption (AES-256, RSA-2048+, ECDSA)",
+        "Upgrade to TLS 1.2 or higher",
+        "Disable weak cipher suites",
+        "Rotate keys and certificates",
+        "Use HSM or key management services"
+      ],
+      "time_to_mitigate": {
+        "critical": "48 hours",
+        "high": "7 days",
+        "medium": "14 days",
+        "low": "30 days"
+      }
+    },
+    "credentials": {
+      "description": "Exposed or weak credentials",
+      "mitigations": [
+        "Revoke exposed credentials immediately",
+        "Generate new strong credentials",
+        "Implement multi-factor authentication",
+        "Enforce password policies",
+        "Use secret management solutions"
+      ],
+      "time_to_mitigate": {
+        "critical": "1 hour",
+        "high": "4 hours",
+        "medium": "24 hours",
+        "low": "72 hours"
+      }
+    },
+    "iam": {
+      "description": "Insecure identity and access management",
+      "mitigations": [
+        "Review and enforce least privilege",
+        "Remove unnecessary permissions",
+        "Implement RBAC",
+        "Audit IAM configurations regularly",
+        "Enable logging and monitoring for IAM changes"
+      ],
+      "time_to_mitigate": {
+        "critical": "24 hours",
+        "high": "48 hours",
+        "medium": "7 days",
+        "low": "14 days"
+      }
+    },
+    "data_breach": {
+      "description": "Data breach or exposure",
+      "mitigations": [
+        "Activate incident response plan",
+        "Isolate affected systems",
+        "Preserve evidence for forensic analysis",
+        "Notify affected parties and regulators",
+        "Engage legal and compliance teams",
+        "Conduct post-incident review"
+      ],
+      "time_to_mitigate": {
+        "critical": "1 hour",
+        "high": "2 hours",
+        "medium": "4 hours",
+        "low": "8 hours"
+      }
+    },
+    "general": {
+      "description": "General security findings",
+      "mitigations": [
+        "Investigate root cause",
+        "Apply appropriate security controls",
+        "Document remediation actions",
+        "Verify resolution",
+        "Update security policies if needed"
+      ],
+      "time_to_mitigate": {
+        "critical": "24 hours",
+        "high": "72 hours",
+        "medium": "7 days",
+        "low": "30 days"
+      }
+    }
+  },
+  "default_mitigation": {
+    "description": "Default mitigation for uncategorized findings",
+    "mitigations": [
+      "Assess the finding and determine the appropriate remediation",
+      "Consult security documentation and vendor guidance",
+      "Escalate to the security team if needed",
+      "Apply standard security hardening practices"
+    ],
+    "time_to_mitigate": {
+      "critical": "24 hours",
+      "high": "72 hours",
+      "medium": "7 days",
+      "low": "30 days"
+    }
+  }
+}

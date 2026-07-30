@@ -1,0 +1,80 @@
+{
+  "version": "1.0.0",
+  "frameworks": {
+    "PCI": {
+      "name": "Payment Card Industry Data Security Standard",
+      "requirements": {
+        "finding_categories": {
+          "vulnerability": "Apply patches within PCI DSS defined timelines (30 days for critical)",
+          "misconfiguration": "Correct configuration to meet PCI DSS requirement",
+          "crypto": "Ensure encryption meets PCI DSS strong cryptography requirements",
+          "credentials": "Implement strong access control and password policies per PCI DSS",
+          "iam": "Follow PCI DSS access control requirements (least privilege)",
+          "data_breach": "Activate PCI DSS incident response procedures"
+        },
+        "floor_raise": 25,
+        "priority_boost": "critical"
+      }
+    },
+    "DPDP": {
+      "name": "Digital Personal Data Protection Act",
+      "requirements": {
+        "finding_categories": {
+          "vulnerability": "Protect personal data from breaches",
+          "misconfiguration": "Ensure data protection controls are correctly configured",
+          "crypto": "Encrypt personal data at rest and in transit",
+          "credentials": "Protect data access credentials",
+          "iam": "Implement data access controls per DPDP",
+          "data_breach": "Notify relevant authorities within 72 hours"
+        },
+        "floor_raise": 20,
+        "priority_boost": "high"
+      }
+    },
+    "ISO27001": {
+      "name": "ISO/IEC 27001",
+      "requirements": {
+        "finding_categories": {
+          "vulnerability": "Apply patches as part of vulnerability management",
+          "misconfiguration": "Correct configuration to meet ISO control requirements",
+          "crypto": "Use approved cryptographic controls",
+          "credentials": "Implement access control and password management",
+          "iam": "Follow access control policy",
+          "data_breach": "Activate incident management procedures"
+        },
+        "floor_raise": 15,
+        "priority_boost": "high"
+      }
+    },
+    "SOC2": {
+      "name": "SOC 2 Trust Services Criteria",
+      "requirements": {
+        "finding_categories": {
+          "vulnerability": "Address vulnerabilities as part of security criteria",
+          "misconfiguration": "Ensure configuration controls meet SOC2 criteria",
+          "crypto": "Implement encryption controls",
+          "credentials": "Secure access credentials",
+          "iam": "Follow access control and identity management",
+          "data_breach": "Follow incident response protocols"
+        },
+        "floor_raise": 20,
+        "priority_boost": "high"
+      }
+    }
+  },
+  "data_sensitivity": {
+    "public": { "weight": 1.0 },
+    "internal": { "weight": 1.2, "note": "Internal data should be protected but not regulated." },
+    "confidential": { "weight": 1.5, "note": "Confidential data requires stronger controls." },
+    "regulated": { "weight": 2.0, "note": "Regulated data has legal compliance requirements." }
+  },
+  "compliance_overrides": {
+    "PCI": {
+      "min_tier": "Medium",
+      "conditions": {
+        "critical_asset": "Critical",
+        "cve_severity": ">= 7.0"
+      }
+    }
+  }
+}

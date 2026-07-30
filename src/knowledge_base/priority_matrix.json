@@ -1,0 +1,58 @@
+{
+  "version": "1.0.0",
+  "matrix": {
+    "critical": {
+      "conditions": [
+        { "field": "severity", "operator": ">=", "value": 8.0 },
+        { "field": "exploitability", "operator": ">=", "value": 80 },
+        { "field": "asset_criticality", "operator": ">=", "value": 85 },
+        { "field": "business_impact", "operator": ">=", "value": 80 }
+      ],
+      "priority": "Critical",
+      "time_to_fix_hours": 24
+    },
+    "high": {
+      "conditions": [
+        { "field": "severity", "operator": ">=", "value": 6.0 },
+        { "field": "exploitability", "operator": ">=", "value": 60 },
+        { "field": "asset_criticality", "operator": ">=", "value": 65 },
+        { "field": "business_impact", "operator": ">=", "value": 60 }
+      ],
+      "priority": "High",
+      "time_to_fix_hours": 72
+    },
+    "medium": {
+      "conditions": [
+        { "field": "severity", "operator": ">=", "value": 4.0 },
+        { "field": "exploitability", "operator": ">=", "value": 30 },
+        { "field": "asset_criticality", "operator": ">=", "value": 35 },
+        { "field": "business_impact", "operator": ">=", "value": 30 }
+      ],
+      "priority": "Medium",
+      "time_to_fix_hours": 168
+    },
+    "low": {
+      "conditions": [
+        { "field": "severity", "operator": "<", "value": 4.0 },
+        { "field": "exploitability", "operator": "<", "value": 30 },
+        { "field": "asset_criticality", "operator": "<", "value": 35 },
+        { "field": "business_impact", "operator": "<", "value": 30 }
+      ],
+      "priority": "Low",
+      "time_to_fix_hours": 720
+    }
+  },
+  "boosts": {
+    "public_internet": { "multiplier": 1.3 },
+    "customer_facing": { "multiplier": 1.2 },
+    "production": { "multiplier": 1.5 },
+    "kev_listed": { "multiplier": 1.8 },
+    "poc_available": { "multiplier": 1.4 }
+  },
+  "floor_raises": {
+    "PCI": 25,
+    "DPDP": 20,
+    "ISO27001": 15,
+    "SOC2": 20
+  }
+}

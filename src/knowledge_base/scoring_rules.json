@@ -1,0 +1,85 @@
+{
+  "version": "1.0.0",
+  "severity_normalization": {
+    "cvss_v3": {
+      "scale": "cvss",
+      "multiplier": 10.0,
+      "min": 0,
+      "max": 100,
+      "note": "CVSS 3.x score * 10"
+    },
+    "cvss_v4": {
+      "scale": "cvss",
+      "multiplier": 10.0,
+      "min": 0,
+      "max": 100,
+      "note": "CVSS 4.x score * 10"
+    },
+    "vendor_custom": {
+      "scale": "custom",
+      "multiplier": 1.0,
+      "min": 0,
+      "max": 100,
+      "note": "Assume custom score is 0-100"
+    },
+    "qualitative": {
+      "scale": "qualitative",
+      "mapping": {
+        "low": 25,
+        "medium": 50,
+        "high": 75,
+        "critical": 95
+      },
+      "default": 50,
+      "note": "Map qualitative strings to numeric values"
+    }
+  },
+  "exploitability": {
+    "kev_multiplier": 92.0,
+    "poc_multiplier": 70.0,
+    "epss_threshold": 0.1,
+    "epss_base": 10.0,
+    "epss_scale": 100.0
+  },
+  "business_impact": {
+    "data_sensitivity_weights": {
+      "public": 0.0,
+      "internal": 10.0,
+      "confidential": 25.0,
+      "regulated": 40.0
+    },
+    "compliance_bonus": 15.0,
+    "revenue_impact": {
+      "none": 0,
+      "low": 10,
+      "medium": 20,
+      "high": 30
+    },
+    "dependents_bonus": {
+      ">10": 15.0,
+      ">5": 10.0,
+      ">0": 5.0
+    }
+  },
+  "confidence_deductions": {
+    "no_owner": 0.2,
+    "stale_scan": 0.2,
+    "no_threat_intel": 0.1,
+    "no_cmdb": 0.3,
+    "single_source": 0.1,
+    "max_deduction": 0.9
+  },
+  "weights": {
+    "asset_importance": 0.25,
+    "vulnerability_severity": 0.20,
+    "exploitability": 0.25,
+    "business_impact": 0.20,
+    "exposure": 0.10
+  },
+  "tier_bounds": {
+    "critical": { "min": 85, "max": 100 },
+    "high": { "min": 65, "max": 84 },
+    "medium": { "min": 35, "max": 64 },
+    "low": { "min": 0, "max": 34 }
+  }
+}
