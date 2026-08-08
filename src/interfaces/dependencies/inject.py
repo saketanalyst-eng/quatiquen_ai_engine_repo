@@ -102,48 +102,37 @@ async def get_orchestrator(
     )
 
 
+# ✅ FIXED: Use-case factories now only pass unit_of_work and ports
 async def get_evaluate_finding_use_case(
-    finding_repo: IFindingRepository = Depends(get_finding_repository),
-    decision_repo: IDecisionRepository = Depends(get_decision_repository),
     uow: IUnitOfWork = Depends(get_unit_of_work),
     cache: CachePort = Depends(get_cache),
     threat_intel: ThreatIntelPort = Depends(get_threat_intel_port),
     llm: LLMPort = Depends(get_llm_port),
     event: EventPort = Depends(get_event_port),
-    asset_repo: IAssetRepository = Depends(get_asset_repository),
 ) -> EvaluateFindingUseCase:
     """Get evaluate finding use case."""
     return EvaluateFindingUseCase(
-        finding_repository=finding_repo,
-        decision_repository=decision_repo,
         unit_of_work=uow,
         cache_port=cache,
         threat_intel_port=threat_intel,
         llm_port=llm,
         event_port=event,
-        asset_repository=asset_repo,
     )
 
 
 async def get_get_decision_use_case(
-    decision_repo: IDecisionRepository = Depends(get_decision_repository),
+    uow: IUnitOfWork = Depends(get_unit_of_work),
 ) -> GetDecisionUseCase:
     """Get get decision use case."""
-    return GetDecisionUseCase(decision_repository=decision_repo)
+    return GetDecisionUseCase(unit_of_work=uow)
 
 
 async def get_recalculate_use_case(
-    finding_repo: IFindingRepository = Depends(get_finding_repository),
-    decision_repo: IDecisionRepository = Depends(get_decision_repository),
     uow: IUnitOfWork = Depends(get_unit_of_work),
-    asset_repo: IAssetRepository = Depends(get_asset_repository),
     threat_intel: ThreatIntelPort = Depends(get_threat_intel_port),
 ) -> RecalculateUseCase:
     """Get recalculate use case."""
     return RecalculateUseCase(
-        finding_repository=finding_repo,
-        decision_repository=decision_repo,
         unit_of_work=uow,
-        asset_repository=asset_repo,
         threat_intel_port=threat_intel,
     )

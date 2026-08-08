@@ -10,9 +10,16 @@ from src.core.constants.enums import PriorityTier
 from src.core.exceptions.application import PipelineInterruptionError, UseCaseError
 from src.core.logging.logger import get_logger
 from src.domain.entities import Decision, Finding
-from src.domain.repositories import IDecisionRepository, IFindingRepository, IUnitOfWork
+from src.domain.repositories import IUnitOfWork
 from src.domain.services import ScoringEngine
 from src.domain.value_objects import BusinessContext, Confidence, Drivers, RiskScore, ThreatContext
+from src.interfaces.schemas.response import (
+    ConfidenceBreakdown,
+    DriverExplanation,
+    DriversResponse,
+    EvaluateFindingResponse,
+    StructuredSummary,
+)
 
 logger = get_logger("quantiquan.application.evaluate_finding")
 
@@ -26,8 +33,6 @@ class EvaluateFindingUseCase:
 
     def __init__(
         self,
-        finding_repository: IFindingRepository,
-        decision_repository: IDecisionRepository,
         unit_of_work: IUnitOfWork,
         cache_port: CachePort,
         threat_intel_port: ThreatIntelPort,
@@ -35,20 +40,6 @@ class EvaluateFindingUseCase:
         event_port: EventPort,
         asset_repository: Optional["IAssetRepository"] = None,  # type: ignore
     ) -> None:
-        """Initialize use case.
-
-        Args:
-            finding_repository: Finding repository.
-            decision_repository: Decision repository.
-            unit_of_work: Unit of work for transactions.
-            cache_port: Cache port.
-            threat_intel_port: Threat intelligence port.
-            llm_port: LLM port.
-            event_port: Event port.
-            asset_repository: Asset repository (optional, if not provided will use finding's asset).
-        """
-        self.finding_repo = finding_repository
-        self.decision_repo = decision_repository
         self.uow = unit_of_work
         self.cache = cache_port
         self.threat_intel = threat_intel_port
@@ -58,17 +49,7 @@ class EvaluateFindingUseCase:
         self.scoring_engine = ScoringEngine()
 
     async def execute(self, request: EvaluateFindingRequest) -> EvaluateFindingResponse:
-        """Execute the use case.
-
-        Args:
-            request: Evaluation request.
-
-        Returns:
-            EvaluateFindingResponse: Result of evaluation.
-
-        Raises:
-            UseCaseError: If any step fails.
-        """
+        """Execute the use case."""
         logger.info(
             "Evaluating finding",
             tenant_id=str(request.tenant_id),
@@ -77,7 +58,7 @@ class EvaluateFindingUseCase:
         )
 
         try:
-            # 1. Normalize: create finding entity
+            # 1. Normalize
             finding = Finding.create(
                 tenant_id=request.tenant_id,
                 asset_id=request.asset_id,
@@ -93,7 +74,7 @@ class EvaluateFindingUseCase:
                 status=request.status,
             )
 
-            # 2. Fetch business context
+            # 2. Business context
             business_context = await self._get_business_context(finding.asset_id, finding.tenant_id)
             if business_context is None:
                 raise PipelineInterruptionError(
@@ -102,37 +83,37 @@ class EvaluateFindingUseCase:
                     finding_id=str(finding.id),
                 )
 
-            # 3. Fetch threat context (if CVE exists)
+            # 3. Threat context
             threat_context = None
             if finding.has_cve and finding.cve_id:
                 threat_context = await self._get_threat_context(finding.cve_id)
 
-            # 4. Normalize vulnerability severity
+            # 4. Severity normalization
             vulnerability_severity = self._normalize_severity(
                 finding.raw_severity,
                 finding.raw_severity_scale,
             )
 
-            # 5. Determine stale status
+            # 5. Stale status
             is_stale = finding.is_stale(int(time.time()))
 
-            # 6. Get source count (for confidence)
+            # 6. Source count
             source_count = await self._get_source_count(finding)
 
-            # 7. Score the finding
+            # 7. Score
             risk_score, drivers, confidence = self.scoring_engine.score_finding(
                 business_context=business_context,
                 threat_context=threat_context or ThreatContext.create(cve_id="") if threat_context else ThreatContext.create(cve_id=""),
                 vulnerability_severity=vulnerability_severity,
                 is_stale=is_stale,
                 source_count=source_count,
-                has_cmdb_record=True,  # Assume CMDB exists; could be derived from asset repository
+                has_cmdb_record=True,
             )
 
-            # 8. Determine tier
+            # 8. Tier
             tier = self.scoring_engine.get_tier(risk_score.final_bis)
 
-            # 9. Generate recommendation
+            # 9. Recommendation
             recommendation_id = await self._generate_recommendation(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
@@ -142,8 +123,8 @@ class EvaluateFindingUseCase:
                 category=self._infer_category(finding),
             )
 
-            # 10. Generate AI summary (non-blocking, may be None)
-            summary = await self._generate_summary(
+            # 10. AI summary
+            summary_obj = await self._generate_summary(
                 finding=finding,
                 risk_score=risk_score,
                 drivers=drivers,
@@ -152,7 +133,30 @@ class EvaluateFindingUseCase:
                 threat_context=threat_context,
             )
 
-            # 11. Build decision aggregate
+            # 11. Confidence breakdown
+            confidence_breakdown = ConfidenceBreakdown(
+                percentage=confidence.percentage,
+                asset_owner_missing=confidence.breakdown["asset_owner_missing"],
+                threat_intel_missing=confidence.breakdown["threat_intel_missing"],
+                cmdb_missing=confidence.breakdown["cmdb_missing"],
+                single_source=confidence.breakdown["single_source"],
+                stale_scan=confidence.breakdown["stale_scan"],
+                total_deductions=confidence.breakdown["total_deductions"],
+                deduction_details=confidence.breakdown["deduction_details"],
+            )
+
+            # 12. Build explained drivers
+            explained = drivers.to_explained_dict(business_context)
+            drivers_response = DriversResponse(
+                asset_importance=DriverExplanation(**explained["asset_importance"]),
+                vulnerability_severity=DriverExplanation(**explained["vulnerability_severity"]),
+                exploitability=DriverExplanation(**explained["exploitability"]),
+                business_impact=DriverExplanation(**explained["business_impact"]),
+                exposure=DriverExplanation(**explained["exposure"]),
+            )
+
+            # 13. Decision
+            summary_str = str(summary_obj) if summary_obj else None
             decision = Decision.create(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
@@ -161,17 +165,17 @@ class EvaluateFindingUseCase:
                 confidence=confidence,
                 drivers=drivers,
                 recommendation_id=recommendation_id,
-                summary=summary,
+                summary=summary_str,
                 version="1.0.0",
             )
 
-            # 12. Persist in transaction
+            # 14. Persist
             async with self.uow:
-                await self.finding_repo.save(finding)
-                await self.decision_repo.save(decision)
+                await self.uow.finding_repository.save(finding)
+                await self.uow.decision_repository.save(decision)
                 await self.uow.commit()
 
-            # 13. Publish events
+            # 15. Events
             await self._publish_events(finding, decision)
 
             logger.info(
@@ -181,15 +185,17 @@ class EvaluateFindingUseCase:
                 bis=risk_score.final_bis,
             )
 
+            # 16. Response
             return EvaluateFindingResponse(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
                 bis=risk_score.final_bis,
                 tier=PriorityTier(tier),
                 confidence=confidence.value,
-                drivers=drivers.to_dict(),
+                confidence_breakdown=confidence_breakdown,
+                drivers=drivers_response,
                 recommendation_id=recommendation_id,
-                summary=summary,
+                summary=summary_obj,
                 computed_at=decision.computed_at,
             )
 
@@ -207,61 +213,49 @@ class EvaluateFindingUseCase:
                 cause=exc,
             )
 
+    # -------------------------------------------------------------------------
+    # Helper methods (all preserved)
+    # -------------------------------------------------------------------------
+
     async def _get_business_context(self, asset_id: UUID, tenant_id: UUID) -> Optional[BusinessContext]:
-        """Get business context for asset from cache or repository."""
         cache_key = f"business_context:{asset_id}"
         try:
             cached = await self.cache.get(cache_key)
             if cached:
-                # In a real implementation, deserialize from cache
-                # For simplicity, we assume cache stores BusinessContext object
-                # but we would need serialization. Here we'll just fetch from repo.
                 pass
         except Exception as exc:
             logger.warning("Cache failed for business context", key=cache_key, error=str(exc))
 
-        # Fetch from repository (would use asset repository)
-        if self.asset_repo:
-            return await self.asset_repo.get_business_context(asset_id, tenant_id)
+        if self.uow.asset_repository:
+            return await self.uow.asset_repository.get_business_context(asset_id, tenant_id)
         return None
 
     async def _get_threat_context(self, cve_id: str) -> ThreatContext:
-        """Get threat context for CVE from cache or external source."""
         cache_key = f"threat_context:{cve_id}"
         try:
             cached = await self.cache.get(cache_key)
             if cached:
-                # Deserialize and return
                 pass
         except Exception as exc:
             logger.warning("Cache failed for threat context", key=cache_key, error=str(exc))
 
-        # Fetch from threat intel port
         context = await self.threat_intel.get_threat_context(cve_id)
         if context:
             try:
-                await self.cache.set(cache_key, context, ttl=86400)  # 24h
+                await self.cache.set(cache_key, context, ttl=86400)
             except Exception as exc:
                 logger.warning("Failed to cache threat context", key=cache_key, error=str(exc))
         return context
 
     def _normalize_severity(self, raw_severity: float, scale: str) -> float:
-        """Normalize raw severity to 0-100 scale."""
-        if scale == "cvss_v3" or scale == "cvss_v4":
-            # CVSS is 0-10, multiply by 10
+        if scale in ("cvss_v3", "cvss_v4"):
             return min(100.0, raw_severity * 10.0)
         if scale == "qualitative":
-            # Qualitative mapping: Low=25, Medium=50, High=75, Critical=95
             mapping = {"low": 25, "medium": 50, "high": 75, "critical": 95}
-            normalized = mapping.get(str(raw_severity).lower(), 50.0)
-            return min(100.0, normalized)
-        # vendor_custom or unknown: clamp to 0-100
+            return min(100.0, mapping.get(str(raw_severity).lower(), 50.0))
         return min(100.0, max(0.0, raw_severity))
 
     async def _get_source_count(self, finding: Finding) -> int:
-        """Get number of sources reporting this finding."""
-        # In reality, we would query other findings with same source_finding_id or asset
-        # For now, return 1
         return 1
 
     async def _generate_recommendation(
@@ -273,19 +267,10 @@ class EvaluateFindingUseCase:
         tier: str,
         category: str,
     ) -> Optional[UUID]:
-        """Generate recommendation for the finding.
-
-        Placeholder: In production, would use knowledge base.
-        """
-        # For now, return None (no recommendation)
         return None
 
     def _infer_category(self, finding: Finding) -> str:
-        """Infer category from finding title/description."""
-        # Simple heuristic: if CVE exists, category = "vulnerability"
-        if finding.has_cve:
-            return "vulnerability"
-        return "general"
+        return "vulnerability" if finding.has_cve else "general"
 
     async def _generate_summary(
         self,
@@ -295,10 +280,9 @@ class EvaluateFindingUseCase:
         tier: str,
         business_context: BusinessContext,
         threat_context: Optional[ThreatContext],
-    ) -> Optional[str]:
-        """Generate AI summary (non-blocking)."""
+    ) -> Optional[StructuredSummary]:
         try:
-            summary = await self.llm.generate_summary(
+            return await self.llm.generate_summary(
                 finding=finding,
                 risk_score=risk_score,
                 drivers=drivers,
@@ -306,7 +290,6 @@ class EvaluateFindingUseCase:
                 business_context=business_context,
                 threat_context=threat_context,
             )
-            return summary
         except Exception as exc:
             logger.warning(
                 "AI summary generation failed, proceeding without summary",
@@ -316,7 +299,6 @@ class EvaluateFindingUseCase:
             return None
 
     async def _publish_events(self, finding: Finding, decision: Decision) -> None:
-        """Publish events after scoring."""
         try:
             await self.event.publish("finding.scored", {
                 "finding_id": str(finding.id),

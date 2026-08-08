@@ -1,7 +1,7 @@
 """Confidence value object representing data completeness and trust."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Tuple, Optional
 
 from src.core.constants.thresholds import (
     CONFIDENCE_FLOOR,
@@ -28,7 +28,7 @@ class Confidence:
     """
 
     value: float
-    deductions: list[tuple[str, float]]
+    deductions: List[Tuple[str, float]]
 
     def __post_init__(self) -> None:
         """Validate confidence invariants."""
@@ -56,6 +56,36 @@ class Confidence:
         """Check if confidence is low (< 0.7)."""
         return self.value < 0.7
 
+    @property
+    def percentage(self) -> int:
+        """Get confidence as a percentage (0-100)."""
+        return int(round(self.value * 100))
+
+    @property
+    def breakdown(self) -> dict:
+        """Get a detailed breakdown of confidence factors.
+
+        Returns:
+            dict: {
+                "asset_owner_missing": bool,
+                "threat_intel_missing": bool,
+                "cmdb_missing": bool,
+                "single_source": bool,
+                "stale_scan": bool,
+                "total_deductions": int,  # percentage points deducted
+                "deduction_details": [{"factor": str, "deduction": int}]
+            }
+        """
+        return {
+            "asset_owner_missing": any(f == "no_asset_owner" for f, _ in self.deductions),
+            "threat_intel_missing": any(f == "no_threat_intel" for f, _ in self.deductions),
+            "cmdb_missing": any(f == "no_cmdb_record" for f, _ in self.deductions),
+            "single_source": any(f == "single_source" for f, _ in self.deductions),
+            "stale_scan": any(f == "stale_finding" for f, _ in self.deductions),
+            "total_deductions": int(round((1.0 - self.value) * 100)),
+            "deduction_details": [{"factor": f, "deduction": int(round(d * 100))} for f, d in self.deductions],
+        }
+
     @classmethod
     def create(
         cls,
@@ -76,9 +106,6 @@ class Confidence:
 
         Returns:
             Confidence: New confidence value object.
-
-        Raises:
-            InvalidValueObjectError: If validation fails.
         """
         deductions = []
         score = 1.0
