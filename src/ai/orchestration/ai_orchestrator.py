@@ -1,6 +1,7 @@
 """AI orchestrator that manages LLM calls with fallbacks and circuit breakers."""
 
 import asyncio
+import re
 from typing import Any, Dict, Optional
 
 from src.ai.models.llm_response import LLMResponse
@@ -23,6 +24,20 @@ logger = get_logger("quantiquan.ai.orchestrator")
 class AIOrchestrator:
     """Orchestrates AI calls with retries, fallbacks, and circuit breakers."""
 
+    # Dangerous patterns for prompt injection detection
+    DANGEROUS_PATTERNS = [
+        r"(?i)ignore previous instructions",
+        r"(?i)override security",
+        r"(?i)change the risk score",
+        r"(?i)set this vulnerability to",
+        r"(?i)reveal system prompt",
+        r"(?i)return secret information",
+        r"(?i)execute command",
+        r"(?i)override policy",
+        r"(?i)pretend you are",
+        r"(?i)you are now",
+    ]
+
     def __init__(
         self,
         primary_provider: Optional[str] = None,
@@ -36,7 +51,27 @@ class AIOrchestrator:
         self.token_counter = TokenCounter()
         self.pipeline = LLMPipeline()
         self._provider_cache: Dict[str, Any] = {}
-        logger.info(f"Groq API Key loaded: {bool(self.settings.groq_api_key.get_secret_value())}")
+
+    def _sanitize_input(self, text: str) -> str:
+        """Sanitize user input to prevent prompt injection.
+
+        Args:
+            text: User input text.
+
+        Returns:
+            str: Sanitized text with dangerous patterns removed.
+        """
+        if not text:
+            return ""
+
+        sanitized = text
+        for pattern in self.DANGEROUS_PATTERNS:
+            sanitized = re.sub(pattern, "[REDACTED]", sanitized, flags=re.IGNORECASE)
+
+        # Escape special characters that could affect JSON parsing
+        sanitized = sanitized.replace('"', '\\"').replace("\n", " ")
+
+        return sanitized
 
     async def generate_summary(
         self,
@@ -53,10 +88,14 @@ class AIOrchestrator:
             StructuredSummary: Object with business_risk, technical_risk,
             why_scored, immediate_recommendation, expected_business_impact.
         """
-        # Build rich context for the prompt
+        # Sanitize user input to prevent prompt injection
+        sanitized_title = self._sanitize_input(finding.title)
+        sanitized_description = self._sanitize_input(finding.description)
+
+        # Build prompt context
         context = {
-            "title": finding.title,
-            "description": finding.description,
+            "title": sanitized_title,
+            "description": sanitized_description,
             "cve_id": finding.cve_id or "None",
             "asset_name": "Unknown",
             "asset_type": getattr(business_context, "asset_type", "Unknown"),
@@ -76,15 +115,15 @@ class AIOrchestrator:
 
         system_prompt, user_prompt = PromptBuilder.build_summary_prompt(context)
 
-        # Use settings.groq_api_key to check if key is set
+        # If no API key, return mock summary
         if not self.settings.groq_api_key.get_secret_value():
-            logger.warning("GROQ_API_KEY not set; returning mock structured summary")
+            logger.warning("GROQ_API_KEY not set; returning mock summary")
             return StructuredSummary(
-                business_risk=f"Exploitation of this {finding.title} could impact your {business_context.exposure.value} environment.",
+                business_risk=f"Exploitation of this {finding.title} could impact your {business_context.exposure.value} environment. Information unavailable for specific financial estimates.",
                 technical_risk=f"This is a {finding.title} affecting {finding.asset_id}. Attackers could exploit it to compromise the system.",
                 why_scored=f"Scored as {tier} due to asset importance ({drivers.asset_importance}) and exploitability ({drivers.exploitability}).",
                 immediate_recommendation="Apply the latest vendor patch and verify the fix.",
-                expected_business_impact="Potential service disruption, data breach, or compliance fines.",
+                expected_business_impact="Potential service disruption, data breach, or compliance issues based on available context.",
             )
 
         try:
@@ -96,10 +135,18 @@ class AIOrchestrator:
                     try:
                         result = await asyncio.wait_for(
                             self._call_provider(provider_name, system_prompt, user_prompt),
-                            timeout=10.0,  # increased from 5.0
+                            timeout=10.0,
                         )
                         if result:
-                            return result
+                            # Validate the result for hallucinations
+                            if self._validate_summary(result):
+                                return result
+                            else:
+                                logger.warning(
+                                    "Hallucination detected in summary, trying next provider",
+                                    provider=provider_name,
+                                )
+                                continue
                     except (LLMProviderError, LLMTimeoutError) as exc:
                         logger.warning("Provider failed, trying next", provider=provider_name, error=str(exc))
                         last_error = exc
@@ -114,6 +161,32 @@ class AIOrchestrator:
         except Exception as exc:
             logger.warning("Circuit breaker or LLM call failed", error=str(exc))
             return None
+
+    def _validate_summary(self, summary: StructuredSummary) -> bool:
+        """Validate the summary for hallucinations and unsupported claims.
+
+        Args:
+            summary: StructuredSummary object to validate.
+
+        Returns:
+            bool: True if validation passes, False otherwise.
+        """
+        # Check for unsupported dollar amounts (hallucinated fines/losses)
+        text = f"{summary.business_risk} {summary.expected_business_impact}"
+        dollar_matches = re.findall(r"\$\s*\d+[,.]?\d*\s*(million|billion|thousand|M|B|K)?", text, re.IGNORECASE)
+
+        # If there are dollar amounts, check if they look generic
+        # We'll be strict: any dollar amount without a qualifier like "potential" or "estimated" is flagged
+        for match in dollar_matches:
+            # Check if the phrase contains "potential", "estimated", or "up to"
+            if not re.search(r"(potential|estimated|approximately|around|about|up to)", text, re.IGNORECASE):
+                logger.warning("Hallucination detected: unsupported dollar amount without qualifier", text=text[:200])
+                return False
+
+        # Check for specific CVE details not in the input (we can't verify, so we trust the LLM)
+        # This is a basic check; more advanced checks can be added later.
+
+        return True
 
     async def _call_provider(
         self,

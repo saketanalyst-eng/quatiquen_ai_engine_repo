@@ -19,11 +19,7 @@ from src.interfaces.schemas.request import (
     EvaluateFindingRequest as EvaluateFindingRequestSchema,
     RecalculateRequest as RecalculateRequestSchema,
 )
-from src.interfaces.schemas.response import (
-    EvaluateFindingResponse,
-    GetDecisionResponse,
-    RecalculateResponse,
-)
+from src.interfaces.schemas.response import DecisionObject
 
 logger = get_logger("quantiquan.interfaces.risk_routes")
 
@@ -32,13 +28,13 @@ router = APIRouter()
 
 @router.post(
     "/risk/calculate",
-    response_model=EvaluateFindingResponse,
+    response_model=DecisionObject,  # ✅ Updated to DecisionObject
     status_code=status.HTTP_201_CREATED,
 )
 async def calculate_risk(
     request: EvaluateFindingRequestSchema,
     use_case: EvaluateFindingUseCase = Depends(get_evaluate_finding_use_case),
-) -> Dict[str, Any]:
+) -> DecisionObject:  # ✅ Updated return type
     """Calculate risk for a new finding.
 
     Args:
@@ -46,13 +42,12 @@ async def calculate_risk(
         use_case: Use case instance.
 
     Returns:
-        Dict[str, Any]: Scoring response.
+        DecisionObject: Unified decision response.
 
     Raises:
         HTTPException: On validation errors.
     """
     try:
-        # Convert schema to DTO
         dto = EvaluateFindingRequest(
             tenant_id=request.tenant_id,
             asset_id=request.asset_id,
@@ -68,7 +63,7 @@ async def calculate_risk(
             status=FindingStatus(request.status) if request.status else FindingStatus.OPEN,
         )
         result = await use_case.execute(dto)
-        return result.__dict__
+        return result
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -84,14 +79,14 @@ async def calculate_risk(
 
 @router.get(
     "/risk/{finding_id}",
-    response_model=GetDecisionResponse,
+    response_model=DecisionObject,  # ✅ Updated to DecisionObject
     status_code=status.HTTP_200_OK,
 )
 async def get_decision(
     finding_id: UUID,
     tenant_id: UUID = Query(..., description="Tenant ID for isolation"),
     use_case: GetDecisionUseCase = Depends(get_get_decision_use_case),
-) -> Dict[str, Any]:
+) -> DecisionObject:  # ✅ Updated return type
     """Get decision for a finding.
 
     Args:
@@ -100,7 +95,7 @@ async def get_decision(
         use_case: Use case instance.
 
     Returns:
-        Dict[str, Any]: Decision data.
+        DecisionObject: Unified decision response.
 
     Raises:
         HTTPException: If not found or error.
@@ -108,7 +103,7 @@ async def get_decision(
     try:
         dto = GetDecisionRequest(finding_id=finding_id, tenant_id=tenant_id)
         result = await use_case.execute(dto)
-        return result.__dict__
+        return result
     except EntityNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -124,13 +119,13 @@ async def get_decision(
 
 @router.post(
     "/risk/recalculate",
-    response_model=RecalculateResponse,
+    response_model=DecisionObject,  # ✅ Updated to DecisionObject
     status_code=status.HTTP_200_OK,
 )
 async def recalculate_risk(
     request: RecalculateRequestSchema,
     use_case: RecalculateUseCase = Depends(get_recalculate_use_case),
-) -> Dict[str, Any]:
+) -> DecisionObject:  # ✅ Updated return type
     """Recalculate risk for an existing finding.
 
     Args:
@@ -138,7 +133,7 @@ async def recalculate_risk(
         use_case: Use case instance.
 
     Returns:
-        Dict[str, Any]: Updated decision.
+        DecisionObject: Updated unified decision response.
 
     Raises:
         HTTPException: On validation or not found.
@@ -150,7 +145,7 @@ async def recalculate_risk(
             force=request.force,
         )
         result = await use_case.execute(dto)
-        return result.__dict__
+        return result
     except EntityNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

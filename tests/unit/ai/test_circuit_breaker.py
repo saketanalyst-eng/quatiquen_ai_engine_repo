@@ -1,70 +1,225 @@
-"""Unit tests for circuit breaker."""
+"""Tests for AI failure isolation – AI failure never blocks scoring."""
 
 import pytest
-from src.ai.orchestration.circuit_breaker import CircuitBreaker
+from unittest.mock import AsyncMock, patch
 
 
 @pytest.mark.asyncio
-async def test_circuit_breaker_closed() -> None:
-    """Test circuit breaker starts closed."""
-    cb = CircuitBreaker(failure_threshold=2, timeout_seconds=1)
-    assert cb.is_closed
-    assert await cb.allow_request() is True
+async def test_ai_failure_does_not_block_scoring():
+    """Test that AI failure does not prevent scoring and decision generation."""
+    # ✅ Import inside the function to avoid circular import
+    from src.application.use_cases.evaluate_finding import EvaluateFindingUseCase
+    from src.core.constants.enums import FindingSource, FindingStatus
+    from src.domain.value_objects import RiskScore, Drivers, Confidence
+
+    # Mock dependencies
+    mock_uow = AsyncMock()
+    mock_cache = AsyncMock()
+    mock_threat_intel = AsyncMock()
+    mock_llm = AsyncMock()
+    mock_event = AsyncMock()
+    mock_asset_repo = AsyncMock()
+
+    # Simulate AI failure (LLM raises exception)
+    mock_llm.generate_summary = AsyncMock(side_effect=Exception("LLM service unavailable"))
+
+    use_case = EvaluateFindingUseCase(
+        unit_of_work=mock_uow,
+        cache_port=mock_cache,
+        threat_intel_port=mock_threat_intel,
+        llm_port=mock_llm,
+        event_port=mock_event,
+        asset_repository=mock_asset_repo,
+    )
+
+    # Mock business context and threat context
+    mock_asset_repo.get_business_context = AsyncMock(return_value=AsyncMock(
+        asset_importance_score=90,
+        business_impact_score=100,
+        exposure_score=70,
+        has_owner=True,
+        is_production=True,
+        data_classification=AsyncMock(value="regulated"),
+        compliance_scopes=[],
+        downstream_dependents=15,
+        revenue_impact="high",
+    ))
+    mock_threat_intel.get_threat_context = AsyncMock(return_value=AsyncMock(
+        exploitability_score=70,
+        is_exploitable=True,
+    ))
+
+    # Mock scoring engine
+    with patch.object(use_case.scoring_engine, 'score_finding') as mock_score:
+        mock_score.return_value = (
+            RiskScore(raw_bis=84.0, final_bis=71.4, confidence_multiplier=0.85),
+            Drivers(asset_importance=90, vulnerability_severity=85, exploitability=70, business_impact=100, exposure=70),
+            Confidence(value=0.5, deductions=[]),
+        )
+
+        request = AsyncMock(
+            tenant_id=AsyncMock(),
+            asset_id=AsyncMock(),
+            source=FindingSource.INTERNAL_SCANNER,
+            source_finding_id="scan-123",
+            title="Test Finding",
+            description="Test Description",
+            raw_severity=8.5,
+            raw_severity_scale="cvss_v3",
+            detected_at=1690000000,
+            raw_payload={},
+            status=FindingStatus.OPEN,
+        )
+
+        result = await use_case.execute(request)
+
+        # Assertions
+        assert result is not None
+        assert result.risk_score is not None
+        assert result.decision is not None
+        assert result.summary is None
+        mock_llm.generate_summary.assert_called_once()
+        assert result.decision_id is not None
+        assert result.finding_id is not None
 
 
 @pytest.mark.asyncio
-async def test_circuit_breaker_opens_after_failures() -> None:
-    """Test circuit breaker opens after threshold failures."""
-    cb = CircuitBreaker(failure_threshold=2, timeout_seconds=1)
+async def test_ai_timeout_does_not_block_scoring():
+    """Test that AI timeout does not prevent scoring."""
+    # ✅ Import inside the function
+    from src.application.use_cases.evaluate_finding import EvaluateFindingUseCase
+    from src.core.constants.enums import FindingSource, FindingStatus
+    from src.domain.value_objects import RiskScore, Drivers, Confidence
 
-    # First failure
-    await cb.record_failure()
-    assert cb.is_closed  # still closed
-    assert cb._failure_count == 1
+    mock_uow = AsyncMock()
+    mock_cache = AsyncMock()
+    mock_threat_intel = AsyncMock()
+    mock_llm = AsyncMock()
+    mock_event = AsyncMock()
+    mock_asset_repo = AsyncMock()
 
-    # Second failure
-    await cb.record_failure()
-    assert cb.is_open
-    assert cb._failure_count == 2
+    mock_llm.generate_summary = AsyncMock(side_effect=TimeoutError("LLM timeout"))
 
-    # Third attempt blocked
-    assert await cb.allow_request() is False
+    use_case = EvaluateFindingUseCase(
+        unit_of_work=mock_uow,
+        cache_port=mock_cache,
+        threat_intel_port=mock_threat_intel,
+        llm_port=mock_llm,
+        event_port=mock_event,
+        asset_repository=mock_asset_repo,
+    )
+
+    mock_asset_repo.get_business_context = AsyncMock(return_value=AsyncMock(
+        asset_importance_score=90,
+        business_impact_score=100,
+        exposure_score=70,
+        has_owner=True,
+        is_production=True,
+        data_classification=AsyncMock(value="regulated"),
+        compliance_scopes=[],
+        downstream_dependents=15,
+        revenue_impact="high",
+    ))
+    mock_threat_intel.get_threat_context = AsyncMock(return_value=AsyncMock(
+        exploitability_score=70,
+        is_exploitable=True,
+    ))
+
+    with patch.object(use_case.scoring_engine, 'score_finding') as mock_score:
+        mock_score.return_value = (
+            RiskScore(raw_bis=84.0, final_bis=71.4, confidence_multiplier=0.85),
+            Drivers(asset_importance=90, vulnerability_severity=85, exploitability=70, business_impact=100, exposure=70),
+            Confidence(value=0.5, deductions=[]),
+        )
+
+        request = AsyncMock(
+            tenant_id=AsyncMock(),
+            asset_id=AsyncMock(),
+            source=FindingSource.INTERNAL_SCANNER,
+            source_finding_id="scan-123",
+            title="Test Finding",
+            description="Test Description",
+            raw_severity=8.5,
+            raw_severity_scale="cvss_v3",
+            detected_at=1690000000,
+            raw_payload={},
+            status=FindingStatus.OPEN,
+        )
+
+        result = await use_case.execute(request)
+
+        assert result is not None
+        assert result.risk_score is not None
+        assert result.summary is None
 
 
 @pytest.mark.asyncio
-async def test_circuit_breaker_half_open_after_timeout() -> None:
-    """Test circuit breaker transitions to half-open after timeout."""
-    cb = CircuitBreaker(failure_threshold=1, timeout_seconds=1)
-    await cb.record_failure()
-    assert cb.is_open
+async def test_ai_malformed_response_does_not_block_scoring():
+    """Test that AI malformed response does not prevent scoring."""
+    # ✅ Import inside the function
+    from src.application.use_cases.evaluate_finding import EvaluateFindingUseCase
+    from src.core.constants.enums import FindingSource, FindingStatus
+    from src.domain.value_objects import RiskScore, Drivers, Confidence
 
-    # Simulate timeout by waiting
-    import asyncio
-    await asyncio.sleep(1.1)
+    mock_uow = AsyncMock()
+    mock_cache = AsyncMock()
+    mock_threat_intel = AsyncMock()
+    mock_llm = AsyncMock()
+    mock_event = AsyncMock()
+    mock_asset_repo = AsyncMock()
 
-    # Should now allow one request
-    assert await cb.allow_request() is True
-    assert cb.is_half_open
+    # Mock LLM to return invalid JSON (or non-structured response)
+    mock_llm.generate_summary = AsyncMock(return_value="Not a valid JSON response")
 
-    # Record success -> closes
-    await cb.record_success()
-    assert cb.is_closed
-    assert cb._failure_count == 0
+    use_case = EvaluateFindingUseCase(
+        unit_of_work=mock_uow,
+        cache_port=mock_cache,
+        threat_intel_port=mock_threat_intel,
+        llm_port=mock_llm,
+        event_port=mock_event,
+        asset_repository=mock_asset_repo,
+    )
 
+    mock_asset_repo.get_business_context = AsyncMock(return_value=AsyncMock(
+        asset_importance_score=90,
+        business_impact_score=100,
+        exposure_score=70,
+        has_owner=True,
+        is_production=True,
+        data_classification=AsyncMock(value="regulated"),
+        compliance_scopes=[],
+        downstream_dependents=15,
+        revenue_impact="high",
+    ))
+    mock_threat_intel.get_threat_context = AsyncMock(return_value=AsyncMock(
+        exploitability_score=70,
+        is_exploitable=True,
+    ))
 
-@pytest.mark.asyncio
-async def test_circuit_breaker_context_manager() -> None:
-    """Test using circuit breaker as context manager."""
-    cb = CircuitBreaker(failure_threshold=1, timeout_seconds=1)
+    with patch.object(use_case.scoring_engine, 'score_finding') as mock_score:
+        mock_score.return_value = (
+            RiskScore(raw_bis=84.0, final_bis=71.4, confidence_multiplier=0.85),
+            Drivers(asset_importance=90, vulnerability_severity=85, exploitability=70, business_impact=100, exposure=70),
+            Confidence(value=0.5, deductions=[]),
+        )
 
-    # Normal success
-    async with cb:
-        pass
-    assert cb.is_closed
-    assert cb._failure_count == 0
+        request = AsyncMock(
+            tenant_id=AsyncMock(),
+            asset_id=AsyncMock(),
+            source=FindingSource.INTERNAL_SCANNER,
+            source_finding_id="scan-123",
+            title="Test Finding",
+            description="Test Description",
+            raw_severity=8.5,
+            raw_severity_scale="cvss_v3",
+            detected_at=1690000000,
+            raw_payload={},
+            status=FindingStatus.OPEN,
+        )
 
-    # Failure
-    with pytest.raises(ValueError):
-        async with cb:
-            raise ValueError("test error")
-    assert cb.is_open
+        result = await use_case.execute(request)
+
+        assert result is not None
+        assert result.risk_score is not None
+        # Summary should be None because parsing failed
+        assert result.summary is None

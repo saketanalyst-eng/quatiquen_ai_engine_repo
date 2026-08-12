@@ -256,3 +256,26 @@ class ScoringEngine:
         )
 
         return risk_score, drivers, confidence
+
+    @staticmethod
+    def normalize_severity(raw_severity: float, scale: str) -> float:
+        """Normalize raw severity to a 0-100 scale.
+
+        This method is used to convert severity scores from various scales
+        (CVSS v3/v4, qualitative, vendor_custom) into a uniform 0-100 scale.
+
+        Args:
+            raw_severity: Raw severity value (source scale).
+            scale: Scale identifier (cvss_v3, cvss_v4, qualitative, vendor_custom).
+
+        Returns:
+            float: Normalized severity (0-100).
+        """
+        if scale in ("cvss_v3", "cvss_v4"):
+            # CVSS is 0-10, multiply by 10, cap at 100
+            return min(100.0, max(0.0, raw_severity * 10.0))
+        if scale == "qualitative":
+            mapping = {"low": 25, "medium": 50, "high": 75, "critical": 95}
+            return min(100.0, mapping.get(str(raw_severity).lower(), 50.0))
+        # vendor_custom or unknown: assume already 0-100, clamp
+        return min(100.0, max(0.0, raw_severity))

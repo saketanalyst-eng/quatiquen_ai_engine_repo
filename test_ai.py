@@ -5,7 +5,7 @@ Test script for QUANTIQUAN AI Engine – with unique source_finding_id.
 This script:
 - Ensures tenant and asset exist in the database.
 - Tests health, readiness, risk calculation, and get decision endpoints.
-- Prints the AI summary from the risk calculation response.
+- Prints the AI summary and decision details from the new DecisionObject response.
 """
 
 import json
@@ -107,7 +107,7 @@ def test_risk_calculation():
         "tenant_id": TENANT_ID,
         "asset_id": ASSET_ID,
         "source": "internal_scanner",
-        "source_finding_id": source_finding_id,  # ✅ unique each run
+        "source_finding_id": source_finding_id,
         "title": "Critical vulnerability in payment API",
         "description": "Unpatched RCE vulnerability in payment gateway",
         "raw_severity": 8.5,
@@ -130,24 +130,54 @@ def test_risk_calculation():
         data = r.json()
 
         print("\n✅ Risk calculation successful!")
-        print(f"   Finding ID : {data.get('finding_id')}")
-        print(f"   BIS        : {data.get('bis')}")
-        print(f"   Tier       : {data.get('tier')}")
-        print(f"   Confidence : {data.get('confidence')}")
+        print(f"   Decision ID : {data.get('decision_id')}")
+        print(f"   Finding ID  : {data.get('finding_id')}")
+        print(f"   Decision    : {data.get('decision')}")
+        print(f"   Priority    : {data.get('priority')}")
+        print(f"   Risk Score  : {data.get('risk_score')}")
+        print(f"   Tier        : {data.get('tier')}")
+        print(f"   Confidence  : {data.get('confidence')}%")
 
-        # --- AI Summary ---
+        # Confidence breakdown
+        cb = data.get('confidence_breakdown')
+        if cb:
+            print("\n📊 Confidence Breakdown:")
+            print(f"   Overall: {cb.get('overall_confidence')}%")
+            categories = cb.get('categories', {})
+            if categories:
+                print("   Categories:")
+                for cat, score in categories.items():
+                    print(f"      {cat}: {score}%")
+
+        # AI Summary
         summary = data.get('summary')
         if summary:
-            print(f"\n🧠 AI Summary:\n{summary}")
+            print("\n🧠 AI Summary:")
+            if isinstance(summary, dict):
+                print(f"   Business Risk: {summary.get('business_risk', 'N/A')[:150]}...")
+                print(f"   Technical Risk: {summary.get('technical_risk', 'N/A')[:150]}...")
+                print(f"   Why Scored: {summary.get('why_scored', 'N/A')[:150]}...")
+                print(f"   Immediate Recommendation: {summary.get('immediate_recommendation', 'N/A')[:150]}...")
+                print(f"   Expected Business Impact: {summary.get('expected_business_impact', 'N/A')[:150]}...")
+            else:
+                print(f"   {summary}")
         else:
             print("\n⚠️ No AI summary returned. Check:")
             print("   - GROQ_API_KEY in .env")
             print("   - Network connectivity to Groq API")
             print("   - Server logs for LLM errors")
 
-        print("\n📊 Drivers:")
-        for k, v in data.get('drivers', {}).items():
-            print(f"   {k}: {v}")
+        # Drivers
+        drivers = data.get('drivers', {})
+        if drivers:
+            print("\n📊 Drivers:")
+            for driver_name, driver_data in drivers.items():
+                if isinstance(driver_data, dict):
+                    value = driver_data.get('value', 'N/A')
+                    explanation = driver_data.get('explanation', '')
+                    print(f"   {driver_name}: {value} – {explanation}")
+                else:
+                    print(f"   {driver_name}: {driver_data}")
 
         return data.get('finding_id')
     except Exception as e:
@@ -169,10 +199,15 @@ def test_get_decision(finding_id):
         r.raise_for_status()
         data = r.json()
         print("✅ Decision retrieved:")
-        print(f"   BIS : {data.get('bis')}")
-        print(f"   Tier: {data.get('tier')}")
-        if data.get('summary'):
-            print(f"   Summary: {data.get('summary')[:150]}...")
+        print(f"   Decision ID : {data.get('decision_id')}")
+        print(f"   Risk Score  : {data.get('risk_score')}")
+        print(f"   Tier        : {data.get('tier')}")
+        print(f"   Confidence  : {data.get('confidence')}%")
+        summary = data.get('summary')
+        if summary and isinstance(summary, dict):
+            print(f"   Summary (business_risk): {summary.get('business_risk', 'N/A')[:150]}...")
+        elif summary:
+            print(f"   Summary: {summary[:150]}...")
     except Exception as e:
         print(f"❌ Get decision failed: {e}")
 

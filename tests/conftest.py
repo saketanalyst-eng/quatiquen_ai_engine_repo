@@ -6,20 +6,46 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.core.config.settings import get_settings
 from src.core.di.container import Container, get_container, reset_container
 from src.core.logging.logger import get_logger
 from src.domain.entities import Finding
 from src.domain.value_objects import BusinessContext, ThreatContext
-from src.infrastructure.cache.memory_cache import MemoryCache
-from src.infrastructure.persistence.unit_of_work import UnitOfWork
-from src.interfaces.middleware.exception_handler import setup_exception_handlers
-from src.main import create_app
 
 logger = get_logger("tests")
+
+
+# ---- Simple in‑memory cache for testing (no infrastructure imports) ----
+class SimpleMemoryCache:
+    """A simple in‑memory cache for tests that avoids importing infrastructure."""
+
+    def __init__(self):
+        self._data = {}
+        self.default_ttl = 300
+
+    async def get(self, key: str):
+        return self._data.get(key)
+
+    async def set(self, key: str, value, ttl=None):
+        self._data[key] = value
+
+    async def delete(self, key: str):
+        self._data.pop(key, None)
+
+    async def exists(self, key: str):
+        return key in self._data
+
+    async def get_async(self, key: str):
+        return await self.get(key)
+
+    async def set_async(self, key: str, value, ttl=None):
+        await self.set(key, value, ttl)
+
+    async def delete_pattern(self, pattern: str):
+        keys_to_delete = [k for k in self._data.keys() if pattern in k]
+        for k in keys_to_delete:
+            self._data.pop(k, None)
 
 
 @pytest.fixture(autouse=True)
@@ -44,8 +70,12 @@ def test_settings():
 
 @pytest.fixture
 def mock_cache() -> AsyncMock:
-    """Mock cache port."""
-    cache = AsyncMock(spec=MemoryCache)
+    """Mock cache port (using SimpleMemoryCache)."""
+    # Return a real SimpleMemoryCache instance instead of a mock
+    # This avoids importing from infrastructure
+    from unittest.mock import AsyncMock
+
+    cache = AsyncMock(spec=SimpleMemoryCache)
     cache.get = AsyncMock(return_value=None)
     cache.set = AsyncMock()
     cache.delete = AsyncMock()
@@ -141,9 +171,10 @@ def mock_decision_repo() -> AsyncMock:
 @pytest.fixture
 def mock_uow() -> AsyncMock:
     """Mock unit of work."""
-    uow = AsyncMock(spec=UnitOfWork)
+    uow = AsyncMock()
     uow.finding_repository = AsyncMock()
     uow.decision_repository = AsyncMock()
+    uow.asset_repository = AsyncMock()
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock()
     uow.commit = AsyncMock()
@@ -211,6 +242,9 @@ def sample_threat_context() -> ThreatContext:
 @pytest.fixture
 def app():
     """Create FastAPI app for testing."""
+    from src.main import create_app
+    from src.interfaces.middleware.exception_handler import setup_exception_handlers
+
     app = create_app()
     setup_exception_handlers(app)
     return app

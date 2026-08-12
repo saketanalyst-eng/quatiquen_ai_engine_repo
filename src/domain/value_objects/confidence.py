@@ -1,7 +1,7 @@
 """Confidence value object representing data completeness and trust."""
 
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from src.core.constants.thresholds import (
     CONFIDENCE_FLOOR,
@@ -63,19 +63,7 @@ class Confidence:
 
     @property
     def breakdown(self) -> dict:
-        """Get a detailed breakdown of confidence factors.
-
-        Returns:
-            dict: {
-                "asset_owner_missing": bool,
-                "threat_intel_missing": bool,
-                "cmdb_missing": bool,
-                "single_source": bool,
-                "stale_scan": bool,
-                "total_deductions": int,  # percentage points deducted
-                "deduction_details": [{"factor": str, "deduction": int}]
-            }
-        """
+        """Get a basic breakdown of confidence deductions."""
         return {
             "asset_owner_missing": any(f == "no_asset_owner" for f, _ in self.deductions),
             "threat_intel_missing": any(f == "no_threat_intel" for f, _ in self.deductions),
@@ -84,6 +72,76 @@ class Confidence:
             "stale_scan": any(f == "stale_finding" for f, _ in self.deductions),
             "total_deductions": int(round((1.0 - self.value) * 100)),
             "deduction_details": [{"factor": f, "deduction": int(round(d * 100))} for f, d in self.deductions],
+        }
+
+    def to_detailed_breakdown(self) -> dict:
+        """
+        Return a detailed breakdown of confidence with category scores.
+
+        Returns:
+            dict: {
+                "overall_confidence": int (0-100),
+                "categories": {
+                    "asset_information": int (0-100),
+                    "business_information": int (0-100),
+                    "threat_intelligence": int (0-100),
+                    "historical_information": int (0-100),
+                    "data_completeness": int (0-100),
+                },
+                "factors": list of {"factor": str, "weight": int, "score": int},
+                "deductions": list of {"factor": str, "deduction": int}
+            }
+        """
+        # Determine presence of each factor
+        has_owner = not any(f == "no_asset_owner" for f, _ in self.deductions)
+        has_threat_intel = not any(f == "no_threat_intel" for f, _ in self.deductions)
+        has_cmdb = not any(f == "no_cmdb_record" for f, _ in self.deductions)
+        is_multi_source = not any(f == "single_source" for f, _ in self.deductions)
+        is_fresh = not any(f == "stale_finding" for f, _ in self.deductions)
+
+        # Category scores (0-100)
+        # Asset Information: owner + CMDB
+        asset_info = 0
+        if has_cmdb:
+            asset_info += 60
+        if has_owner:
+            asset_info += 40
+
+        # Business Information: always 100 if asset exists
+        business_info = 100
+
+        # Threat Intelligence: EPSS/KEV/PoC available
+        threat_intel = 100 if has_threat_intel else 0
+
+        # Historical Information: fresh scan
+        historical_info = 100 if is_fresh else 0
+
+        # Data Completeness: multiple sources
+        data_completeness = 100 if is_multi_source else 0
+
+        # Factor breakdown (individual factors with weights)
+        factors = [
+            {"factor": "Asset owner assigned", "weight": 20, "score": 100 if has_owner else 0},
+            {"factor": "CMDB record exists", "weight": 30, "score": 100 if has_cmdb else 0},
+            {"factor": "Threat intelligence available", "weight": 15, "score": 100 if has_threat_intel else 0},
+            {"factor": "Multiple sources", "weight": 20, "score": 100 if is_multi_source else 0},
+            {"factor": "Scan age <= 30 days", "weight": 15, "score": 100 if is_fresh else 0},
+        ]
+
+        # Deduction details (existing)
+        deductions = [{"factor": f, "deduction": int(round(d * 100))} for f, d in self.deductions]
+
+        return {
+            "overall_confidence": self.percentage,
+            "categories": {
+                "asset_information": asset_info,
+                "business_information": business_info,
+                "threat_intelligence": threat_intel,
+                "historical_information": historical_info,
+                "data_completeness": data_completeness,
+            },
+            "factors": factors,
+            "deductions": deductions,
         }
 
     @classmethod

@@ -2,10 +2,11 @@
 
 import time
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from src.application.dto import EvaluateFindingRequest, EvaluateFindingResponse
 from src.application.ports import CachePort, EventPort, LLMPort, ThreatIntelPort
+from src.core.config.settings import get_settings
 from src.core.constants.enums import PriorityTier
 from src.core.exceptions.application import PipelineInterruptionError, UseCaseError
 from src.core.logging.logger import get_logger
@@ -13,11 +14,12 @@ from src.domain.entities import Decision, Finding
 from src.domain.repositories import IUnitOfWork
 from src.domain.services import ScoringEngine
 from src.domain.value_objects import BusinessContext, Confidence, Drivers, RiskScore, ThreatContext
+from src.domain.value_objects.priority import PriorityMapping
 from src.interfaces.schemas.response import (
     ConfidenceBreakdown,
+    DecisionObject,
     DriverExplanation,
     DriversResponse,
-    EvaluateFindingResponse,
     StructuredSummary,
 )
 
@@ -48,13 +50,31 @@ class EvaluateFindingUseCase:
         self.asset_repo = asset_repository
         self.scoring_engine = ScoringEngine()
 
-    async def execute(self, request: EvaluateFindingRequest) -> EvaluateFindingResponse:
-        """Execute the use case."""
+    async def execute(
+        self,
+        request: EvaluateFindingRequest,
+        request_id: Optional[str] = None,
+    ) -> DecisionObject:
+        """Execute the use case.
+
+        Args:
+            request: Evaluation request.
+            request_id: Optional request ID for tracing.
+
+        Returns:
+            DecisionObject: Unified decision response.
+
+        Raises:
+            UseCaseError: If any step fails.
+        """
+        start_time = time.perf_counter()
+
         logger.info(
             "Evaluating finding",
             tenant_id=str(request.tenant_id),
             asset_id=str(request.asset_id),
             source=request.source.value,
+            request_id=request_id,
         )
 
         try:
@@ -113,7 +133,7 @@ class EvaluateFindingUseCase:
             # 8. Tier
             tier = self.scoring_engine.get_tier(risk_score.final_bis)
 
-            # 9. Recommendation
+            # 9. Recommendation (placeholder)
             recommendation_id = await self._generate_recommendation(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
@@ -123,7 +143,7 @@ class EvaluateFindingUseCase:
                 category=self._infer_category(finding),
             )
 
-            # 10. AI summary
+            # 10. AI summary (non-blocking)
             summary_obj = await self._generate_summary(
                 finding=finding,
                 risk_score=risk_score,
@@ -133,16 +153,13 @@ class EvaluateFindingUseCase:
                 threat_context=threat_context,
             )
 
-            # 11. Confidence breakdown
+            # 11. Build detailed confidence breakdown
+            detailed_breakdown = confidence.to_detailed_breakdown()
             confidence_breakdown = ConfidenceBreakdown(
-                percentage=confidence.percentage,
-                asset_owner_missing=confidence.breakdown["asset_owner_missing"],
-                threat_intel_missing=confidence.breakdown["threat_intel_missing"],
-                cmdb_missing=confidence.breakdown["cmdb_missing"],
-                single_source=confidence.breakdown["single_source"],
-                stale_scan=confidence.breakdown["stale_scan"],
-                total_deductions=confidence.breakdown["total_deductions"],
-                deduction_details=confidence.breakdown["deduction_details"],
+                overall_confidence=confidence.percentage,
+                categories=detailed_breakdown["categories"],
+                factors=detailed_breakdown["factors"],
+                deductions=detailed_breakdown["deductions"],
             )
 
             # 12. Build explained drivers
@@ -155,7 +172,44 @@ class EvaluateFindingUseCase:
                 exposure=DriverExplanation(**explained["exposure"]),
             )
 
-            # 13. Decision
+            # 13. Get decision metadata from tier
+            tier_enum = PriorityTier(tier)
+            decision_text = PriorityMapping.get_decision(tier_enum)
+            priority_level = PriorityMapping.get_priority(tier_enum)
+            due_hours = PriorityMapping.get_due_hours(tier_enum)
+
+            # 14. Compute expected risk reduction
+            expected_risk_reduction = int(round(drivers.exploitability * 0.5 + 10))
+
+            # 15. Estimate fix time
+            if due_hours <= 4:
+                estimated_fix_time = f"{due_hours} hours"
+            elif due_hours <= 24:
+                estimated_fix_time = f"{due_hours} hours"
+            else:
+                days = due_hours // 24
+                estimated_fix_time = f"{days} days"
+
+            # 16. Business owner
+            business_owner = "Unassigned"
+            if business_context and business_context.owner_id:
+                # In future, fetch name from user repository
+                business_owner = "Assigned Owner"
+
+            # 17. Build reason (combine driver explanations)
+            reason_parts = [
+                drivers_response.asset_importance.explanation,
+                drivers_response.vulnerability_severity.explanation,
+                drivers_response.exploitability.explanation,
+                drivers_response.business_impact.explanation,
+                drivers_response.exposure.explanation,
+            ]
+            reason = " ".join(reason_parts)
+
+            # 18. Next action (from summary or fallback)
+            next_action = summary_obj.immediate_recommendation if summary_obj else "Review and remediate"
+
+            # 19. Build decision aggregate
             summary_str = str(summary_obj) if summary_obj else None
             decision = Decision.create(
                 finding_id=finding.id,
@@ -169,35 +223,57 @@ class EvaluateFindingUseCase:
                 version="1.0.0",
             )
 
-            # 14. Persist
+            # 20. Persist
             async with self.uow:
                 await self.uow.finding_repository.save(finding)
                 await self.uow.decision_repository.save(decision)
                 await self.uow.commit()
 
-            # 15. Events
+            # 21. Publish events
             await self._publish_events(finding, decision)
+
+            # 22. Build DecisionObject
+            decision_id = uuid4()
+            decision_timestamp = int(time.time())
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            settings = get_settings()
+            engine_version = settings.app_version
+            model_version = settings.groq_model
+
+            decision_object = DecisionObject(
+                decision_id=decision_id,
+                finding_id=finding.id,
+                tenant_id=finding.tenant_id,
+                decision=decision_text,
+                priority=priority_level,
+                risk_score=int(round(risk_score.final_bis)),
+                tier=tier,
+                confidence=confidence.percentage,
+                confidence_breakdown=confidence_breakdown,
+                expected_risk_reduction=expected_risk_reduction,
+                estimated_fix_time=estimated_fix_time,
+                business_owner=business_owner,
+                next_action=next_action,
+                reason=reason,
+                drivers=drivers_response,
+                summary=summary_obj,
+                computed_at=decision_timestamp,
+                engine_version=engine_version,
+                model_version=model_version,
+                prompt_version=None,
+                knowledge_base_version=None,
+            )
 
             logger.info(
                 "Finding evaluated successfully",
                 finding_id=str(finding.id),
                 tier=tier,
-                bis=risk_score.final_bis,
+                risk_score=int(round(risk_score.final_bis)),
+                decision_id=str(decision_id),
+                processing_time_ms=round(processing_time_ms, 2),
             )
 
-            # 16. Response
-            return EvaluateFindingResponse(
-                finding_id=finding.id,
-                tenant_id=finding.tenant_id,
-                bis=risk_score.final_bis,
-                tier=PriorityTier(tier),
-                confidence=confidence.value,
-                confidence_breakdown=confidence_breakdown,
-                drivers=drivers_response,
-                recommendation_id=recommendation_id,
-                summary=summary_obj,
-                computed_at=decision.computed_at,
-            )
+            return decision_object
 
         except Exception as exc:
             logger.error(
@@ -282,7 +358,7 @@ class EvaluateFindingUseCase:
         threat_context: Optional[ThreatContext],
     ) -> Optional[StructuredSummary]:
         try:
-            return await self.llm.generate_summary(
+            summary = await self.llm.generate_summary(
                 finding=finding,
                 risk_score=risk_score,
                 drivers=drivers,
@@ -290,6 +366,7 @@ class EvaluateFindingUseCase:
                 business_context=business_context,
                 threat_context=threat_context,
             )
+            return summary
         except Exception as exc:
             logger.warning(
                 "AI summary generation failed, proceeding without summary",
