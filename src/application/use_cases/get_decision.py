@@ -10,12 +10,6 @@ from src.core.exceptions.domain import EntityNotFoundError
 from src.core.logging.logger import get_logger
 from src.domain.repositories import IUnitOfWork
 from src.domain.value_objects.priority import PriorityMapping
-from src.interfaces.schemas.response import (
-    ConfidenceBreakdown,
-    DecisionObject,
-    DriverExplanation,
-    DriversResponse,
-)
 
 logger = get_logger("quantiquan.application.get_decision")
 
@@ -26,7 +20,7 @@ class GetDecisionUseCase:
     def __init__(self, unit_of_work: IUnitOfWork) -> None:
         self.uow = unit_of_work
 
-    async def execute(self, request: GetDecisionRequest) -> DecisionObject:
+    async def execute(self, request: GetDecisionRequest) -> "DecisionObject":
         """Execute the use case.
 
         Args:
@@ -46,6 +40,14 @@ class GetDecisionUseCase:
         )
 
         try:
+            # Lazy import to break circular dependency
+            from src.interfaces.schemas.response import (
+                ConfidenceBreakdown,
+                DecisionObject,
+                DriverExplanation,
+                DriversResponse,
+            )
+
             decision = await self.uow.decision_repository.get_by_finding_id(
                 request.finding_id,
                 request.tenant_id,

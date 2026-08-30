@@ -51,10 +51,105 @@ class KnowledgeBaseSeeder:
             await self.engine.dispose()
 
     async def _create_tables_if_not_exist(self) -> None:
-        """Create tables if they don't exist."""
+        """Create all tables if they don't exist."""
         logger.info("Creating tables if not exist")
         async with self.engine.begin() as conn:
+            # 1. Create core tables (if missing) using SQLAlchemy metadata
             await conn.run_sync(Base.metadata.create_all)
+
+            # 2. Create knowledge base tables (missing due to migration)
+            #    These are not part of the ORM models, so we create them manually.
+            knowledge_base_ddl = """
+            -- Priority Matrix
+            CREATE TABLE IF NOT EXISTS priority_matrix (
+                tier VARCHAR(20) PRIMARY KEY,
+                conditions JSON NOT NULL DEFAULT '[]',
+                time_to_fix_hours INTEGER NOT NULL DEFAULT 24,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Boost Mappings
+            CREATE TABLE IF NOT EXISTS boost_mappings (
+                name VARCHAR(50) PRIMARY KEY,
+                multiplier FLOAT NOT NULL DEFAULT 1.0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Scoring Weights
+            CREATE TABLE IF NOT EXISTS scoring_weights (
+                name VARCHAR(50) PRIMARY KEY,
+                value FLOAT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Data Sensitivity Mappings
+            CREATE TABLE IF NOT EXISTS data_sensitivity_mappings (
+                name VARCHAR(50) PRIMARY KEY,
+                weight FLOAT NOT NULL DEFAULT 1.0,
+                note VARCHAR(255),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Mitigation Categories
+            CREATE TABLE IF NOT EXISTS mitigation_categories (
+                name VARCHAR(100) PRIMARY KEY,
+                description VARCHAR(500),
+                mitigations JSON NOT NULL DEFAULT '[]',
+                time_to_mitigate JSON NOT NULL DEFAULT '{}',
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Compliance Frameworks
+            CREATE TABLE IF NOT EXISTS compliance_frameworks (
+                name VARCHAR(50) PRIMARY KEY,
+                display_name VARCHAR(255) NOT NULL,
+                requirements JSON NOT NULL DEFAULT '{}',
+                floor_raise INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Severity Normalization
+            CREATE TABLE IF NOT EXISTS severity_normalization (
+                scale_name VARCHAR(50) PRIMARY KEY,
+                config JSON NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Tier Bounds
+            CREATE TABLE IF NOT EXISTS tier_bounds (
+                tier VARCHAR(20) PRIMARY KEY,
+                min_score INTEGER NOT NULL,
+                max_score INTEGER NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+
+            -- Remediation Templates
+            CREATE TABLE IF NOT EXISTS remediation_templates (
+                id VARCHAR(50) PRIMARY KEY,
+                category VARCHAR(100) NOT NULL,
+                cve_pattern VARCHAR(50),
+                technical_text TEXT NOT NULL,
+                estimated_effort VARCHAR(20) NOT NULL,
+                estimated_impact INTEGER NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            """
+            # Execute each statement separately to avoid transaction issues
+            for stmt in knowledge_base_ddl.split(';'):
+                stmt = stmt.strip()
+                if stmt:
+                    await conn.execute(text(stmt))
+
         logger.info("Tables created/verified")
 
     async def _clear_existing_data(self, async_session: AsyncSession) -> None:
@@ -417,7 +512,7 @@ class KnowledgeBaseSeeder:
     async def seed_all(self) -> None:
         """Seed all knowledge base data."""
         async with self.async_session() as session:
-            # Ensure tables exist
+            # Ensure all tables exist (including knowledge base)
             await self._create_tables_if_not_exist()
 
             logger.info("Starting knowledge base seed")

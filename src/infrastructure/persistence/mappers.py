@@ -43,9 +43,9 @@ class FindingMapper:
     def to_model(entity: Finding) -> FindingModel:
         """Convert domain entity to ORM model."""
         return FindingModel(
-            id=str(entity.id),  # ✅ Convert UUID to string
-            tenant_id=str(entity.tenant_id),  # ✅ Convert UUID to string
-            asset_id=str(entity.asset_id),  # ✅ Convert UUID to string
+            id=str(entity.id),
+            tenant_id=str(entity.tenant_id),
+            asset_id=str(entity.asset_id),
             source=entity.source.value,
             source_finding_id=entity.source_finding_id,
             cve_id=entity.cve_id,
@@ -86,7 +86,7 @@ class AssetMapper:
     def to_business_context(model: AssetModel) -> BusinessContext:
         """Convert ORM model to BusinessContext value object."""
         return BusinessContext(
-            asset_id=UUID(model.id),
+            asset_id=UUID(str(model.id)),
             importance_tier=model.importance_tier,
             owner_id=UUID(model.owner_id) if model.owner_id else None,
             data_classification=DataSensitivity(model.data_classification),
@@ -139,6 +139,9 @@ class DecisionMapper:
             summary=rec_model.business_explanation if rec_model else None,
             computed_at=decision_model.computed_at,
             version=decision_model.version,
+            job_id=UUID(decision_model.job_id),                     # <-- ADDED
+            trace_id=UUID(decision_model.trace_id),                 # <-- ADDED
+            knowledge_version=decision_model.knowledge_version,     # <-- ADDED
         )
 
     @staticmethod
@@ -146,8 +149,8 @@ class DecisionMapper:
         """Convert Decision to ORM models."""
         decision_model = DecisionModel(
             id=None,  # Let DB generate
-            finding_id=str(decision.finding_id),  # ✅ Convert UUID to string
-            tenant_id=str(decision.tenant_id),  # ✅ Convert UUID to string
+            finding_id=str(decision.finding_id),
+            tenant_id=str(decision.tenant_id),
             bis=decision.bis,
             tier=decision.tier.value,
             confidence=decision.confidence.value,
@@ -178,9 +181,9 @@ class DecisionMapper:
         rec_model = None
         if decision.recommendation_id:
             rec_model = RecommendationModel(
-                id=str(decision.recommendation_id),  # ✅ Convert UUID to string
-                finding_id=str(decision.finding_id),  # ✅ Convert UUID to string
-                tenant_id=str(decision.tenant_id),  # ✅ Convert UUID to string
+                id=str(decision.recommendation_id),
+                finding_id=str(decision.finding_id),
+                tenant_id=str(decision.tenant_id),
                 technical_text="",
                 business_explanation=decision.summary,
                 estimated_effort="medium",

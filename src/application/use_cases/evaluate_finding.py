@@ -15,13 +15,6 @@ from src.domain.repositories import IUnitOfWork
 from src.domain.services import ScoringEngine
 from src.domain.value_objects import BusinessContext, Confidence, Drivers, RiskScore, ThreatContext
 from src.domain.value_objects.priority import PriorityMapping
-from src.interfaces.schemas.response import (
-    ConfidenceBreakdown,
-    DecisionObject,
-    DriverExplanation,
-    DriversResponse,
-    StructuredSummary,
-)
 
 logger = get_logger("quantiquan.application.evaluate_finding")
 
@@ -54,7 +47,7 @@ class EvaluateFindingUseCase:
         self,
         request: EvaluateFindingRequest,
         request_id: Optional[str] = None,
-    ) -> DecisionObject:
+    ) -> "DecisionObject":
         """Execute the use case.
 
         Args:
@@ -78,6 +71,14 @@ class EvaluateFindingUseCase:
         )
 
         try:
+            from src.interfaces.schemas.response import (
+                ConfidenceBreakdown,
+                DecisionObject,
+                DriverExplanation,
+                DriversResponse,
+                StructuredSummary,
+            )
+
             # 1. Normalize
             finding = Finding.create(
                 tenant_id=request.tenant_id,
@@ -94,8 +95,10 @@ class EvaluateFindingUseCase:
                 status=request.status,
             )
 
-            # 2. Business context
-            business_context = await self._get_business_context(finding.asset_id, finding.tenant_id)
+            business_context = await self._get_business_context_isolated(
+                asset_id=finding.asset_id,
+                tenant_id=finding.tenant_id
+            )
             if business_context is None:
                 raise PipelineInterruptionError(
                     "Business context not found for asset",
@@ -103,24 +106,18 @@ class EvaluateFindingUseCase:
                     finding_id=str(finding.id),
                 )
 
-            # 3. Threat context
             threat_context = None
             if finding.has_cve and finding.cve_id:
                 threat_context = await self._get_threat_context(finding.cve_id)
 
-            # 4. Severity normalization
             vulnerability_severity = self._normalize_severity(
                 finding.raw_severity,
                 finding.raw_severity_scale,
             )
 
-            # 5. Stale status
             is_stale = finding.is_stale(int(time.time()))
-
-            # 6. Source count
             source_count = await self._get_source_count(finding)
 
-            # 7. Score
             risk_score, drivers, confidence = self.scoring_engine.score_finding(
                 business_context=business_context,
                 threat_context=threat_context or ThreatContext.create(cve_id="") if threat_context else ThreatContext.create(cve_id=""),
@@ -130,10 +127,8 @@ class EvaluateFindingUseCase:
                 has_cmdb_record=True,
             )
 
-            # 8. Tier
             tier = self.scoring_engine.get_tier(risk_score.final_bis)
 
-            # 9. Recommendation (placeholder)
             recommendation_id = await self._generate_recommendation(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
@@ -143,7 +138,6 @@ class EvaluateFindingUseCase:
                 category=self._infer_category(finding),
             )
 
-            # 10. AI summary (non-blocking)
             summary_obj = await self._generate_summary(
                 finding=finding,
                 risk_score=risk_score,
@@ -153,7 +147,6 @@ class EvaluateFindingUseCase:
                 threat_context=threat_context,
             )
 
-            # 11. Build detailed confidence breakdown
             detailed_breakdown = confidence.to_detailed_breakdown()
             confidence_breakdown = ConfidenceBreakdown(
                 overall_confidence=confidence.percentage,
@@ -162,7 +155,6 @@ class EvaluateFindingUseCase:
                 deductions=detailed_breakdown["deductions"],
             )
 
-            # 12. Build explained drivers
             explained = drivers.to_explained_dict(business_context)
             drivers_response = DriversResponse(
                 asset_importance=DriverExplanation(**explained["asset_importance"]),
@@ -172,16 +164,13 @@ class EvaluateFindingUseCase:
                 exposure=DriverExplanation(**explained["exposure"]),
             )
 
-            # 13. Get decision metadata from tier
             tier_enum = PriorityTier(tier)
             decision_text = PriorityMapping.get_decision(tier_enum)
             priority_level = PriorityMapping.get_priority(tier_enum)
             due_hours = PriorityMapping.get_due_hours(tier_enum)
 
-            # 14. Compute expected risk reduction
             expected_risk_reduction = int(round(drivers.exploitability * 0.5 + 10))
 
-            # 15. Estimate fix time
             if due_hours <= 4:
                 estimated_fix_time = f"{due_hours} hours"
             elif due_hours <= 24:
@@ -190,13 +179,10 @@ class EvaluateFindingUseCase:
                 days = due_hours // 24
                 estimated_fix_time = f"{days} days"
 
-            # 16. Business owner
             business_owner = "Unassigned"
             if business_context and business_context.owner_id:
-                # In future, fetch name from user repository
                 business_owner = "Assigned Owner"
 
-            # 17. Build reason (combine driver explanations)
             reason_parts = [
                 drivers_response.asset_importance.explanation,
                 drivers_response.vulnerability_severity.explanation,
@@ -206,11 +192,11 @@ class EvaluateFindingUseCase:
             ]
             reason = " ".join(reason_parts)
 
-            # 18. Next action (from summary or fallback)
             next_action = summary_obj.immediate_recommendation if summary_obj else "Review and remediate"
 
-            # 19. Build decision aggregate
             summary_str = str(summary_obj) if summary_obj else None
+
+            # --- CREATE DECISION (WITH REQUIRED IDEMPOTENCY FIELDS) ---
             decision = Decision.create(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
@@ -221,18 +207,18 @@ class EvaluateFindingUseCase:
                 recommendation_id=recommendation_id,
                 summary=summary_str,
                 version="1.0.0",
+                job_id=uuid4(),                # <-- Added
+                trace_id=uuid4(),              # <-- Added
+                knowledge_version="1.0.0",     # <-- Added
             )
 
-            # 20. Persist
             async with self.uow:
                 await self.uow.finding_repository.save(finding)
                 await self.uow.decision_repository.save(decision)
                 await self.uow.commit()
 
-            # 21. Publish events
             await self._publish_events(finding, decision)
 
-            # 22. Build DecisionObject
             decision_id = uuid4()
             decision_timestamp = int(time.time())
             processing_time_ms = (time.perf_counter() - start_time) * 1000
@@ -289,22 +275,14 @@ class EvaluateFindingUseCase:
                 cause=exc,
             )
 
-    # -------------------------------------------------------------------------
-    # Helper methods (all preserved)
-    # -------------------------------------------------------------------------
+    async def _get_business_context_isolated(self, asset_id: UUID, tenant_id: UUID) -> Optional[BusinessContext]:
+        async with self.uow:
+            context = await self.uow.asset_repository.get_business_context(asset_id, tenant_id)
+            await self.uow.rollback()
+        return context
 
     async def _get_business_context(self, asset_id: UUID, tenant_id: UUID) -> Optional[BusinessContext]:
-        cache_key = f"business_context:{asset_id}"
-        try:
-            cached = await self.cache.get(cache_key)
-            if cached:
-                pass
-        except Exception as exc:
-            logger.warning("Cache failed for business context", key=cache_key, error=str(exc))
-
-        if self.uow.asset_repository:
-            return await self.uow.asset_repository.get_business_context(asset_id, tenant_id)
-        return None
+        return await self._get_business_context_isolated(asset_id, tenant_id)
 
     async def _get_threat_context(self, cve_id: str) -> ThreatContext:
         cache_key = f"threat_context:{cve_id}"
@@ -356,7 +334,7 @@ class EvaluateFindingUseCase:
         tier: str,
         business_context: BusinessContext,
         threat_context: Optional[ThreatContext],
-    ) -> Optional[StructuredSummary]:
+    ) -> Optional["StructuredSummary"]:
         try:
             summary = await self.llm.generate_summary(
                 finding=finding,

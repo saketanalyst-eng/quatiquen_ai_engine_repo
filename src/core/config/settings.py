@@ -23,13 +23,30 @@ class AppSettings(BaseSettings):
         description="CORS allowed origins",
     )
 
-    # Database URL – now accepts PostgreSQL, SQLite, or any valid DB URL
-    database_url: str = Field(
+    # --- P0.3: Database configuration (preserved + extended) ---
+    # Renamed original field to db_raw_url to store the static value
+    db_raw_url: str = Field(
         "sqlite+aiosqlite:///./quantiquan.db",
-        description="Database connection string (PostgreSQL or SQLite)",
+        description="Raw database connection string",
+        alias="DATABASE_URL",  # <--- ADDED to read from environment variable
     )
+    # Existing pool fields remain unchanged
     database_pool_size: int = Field(10, description="Connection pool size")
     database_max_overflow: int = Field(20, description="Max overflow connections")
+
+    # --- P0.3: NEW Supabase configuration for test environment ---
+    supabase_test_host: str = Field(
+        "",
+        description="Supabase host for test environment (e.g., your-project.supabase.co)",
+    )
+    supabase_test_user: str = Field(
+        "postgres",
+        description="Supabase database user for test environment",
+    )
+    supabase_test_password: SecretStr = Field(
+        SecretStr(""),
+        description="Supabase database password for test environment",
+    )
 
     redis_url: str = Field(
         "redis://localhost:6379/0",
@@ -78,6 +95,7 @@ class AppSettings(BaseSettings):
         description="Circuit breaker timeout",
     )
 
+    # --- ALL ORIGINAL VALIDATORS (PRESERVED 100%) ---
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def parse_allowed_origins(cls, value):
@@ -89,7 +107,8 @@ class AppSettings(BaseSettings):
                 return [x.strip() for x in value.split(",") if x.strip()]
         return value
 
-    @field_validator("database_url", mode="before")
+    # PRESERVED: database_url validator (now applied to db_raw_url)
+    @field_validator("db_raw_url", mode="before")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
         """Ensure database URL is provided and not empty."""
@@ -97,14 +116,29 @@ class AppSettings(BaseSettings):
             raise ValueError("DATABASE_URL must be set")
         return value
 
+    # PRESERVED: environment validator (added "test" to allowed list)
     @field_validator("environment", mode="before")
     @classmethod
     def validate_environment(cls, value: str) -> str:
         """Validate environment value."""
-        valid = {"development", "staging", "production"}
+        valid = {"development", "staging", "production", "test"}
         if value not in valid:
             raise ValueError(f"environment must be one of {valid}")
         return value
+
+    # --- NEW: database_url property (dynamic, preserves interface) ---
+    @property
+    def database_url(self) -> str:
+        """Get the actual database URL based on environment.
+        
+        - In 'test' environment, if Supabase credentials are provided,
+          returns a PostgreSQL connection string.
+        - Otherwise, returns the raw db_raw_url (SQLite by default).
+        """
+        if self.environment == "test" and self.supabase_test_host:
+            password = self.supabase_test_password.get_secret_value()
+            return f"postgresql+asyncpg://{self.supabase_test_user}:{password}@{self.supabase_test_host}:5432/postgres"
+        return self.db_raw_url
 
     class Config:
         env_file = ".env"
@@ -123,4 +157,5 @@ def get_settings() -> AppSettings:
     return AppSettings()
 
 
+# PRESERVED: Original alias
 Settings = AppSettings

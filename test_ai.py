@@ -3,20 +3,27 @@
 Test script for QUANTIQUAN AI Engine – with unique source_finding_id.
 
 This script:
-- Ensures tenant and asset exist in the database.
+- Ensures tenant and asset exist in the database (Supabase/PostgreSQL).
 - Tests health, readiness, risk calculation, and get decision endpoints.
 - Prints the AI summary and decision details from the new DecisionObject response.
 """
 
 import json
 import sys
-import sqlite3
 import uuid
+import os
 
 try:
     import requests
 except ImportError:
     print("❌ 'requests' library not found. Install with: pip install requests")
+    sys.exit(1)
+
+try:
+    import psycopg2
+    from psycopg2 import sql
+except ImportError:
+    print("❌ 'psycopg2' library not found. Install with: pip install psycopg2-binary")
     sys.exit(1)
 
 BASE_URL = "http://localhost:8000/api/v1"
@@ -25,17 +32,44 @@ BASE_URL = "http://localhost:8000/api/v1"
 TENANT_ID = "11111111111111111111111111111111"
 ASSET_ID = "22222222222222222222222222222222"
 
+# Supabase Direct Connection Details (hardcoded for reliability)
+SUPABASE_HOST = "db.uqshfzellpfvkwynaslm.supabase.co"  # ✅ Correct DB host
+SUPABASE_USER = "postgres"
+SUPABASE_PASSWORD = "Anantntera@123"  # Replace with your actual password if different
+SUPABASE_DB = "postgres"
+SUPABASE_PORT = "5432"
+
+
+def get_db_connection():
+    """Get a synchronous PostgreSQL connection using hardcoded Supabase credentials."""
+    try:
+        conn = psycopg2.connect(
+            host=SUPABASE_HOST,
+            user=SUPABASE_USER,
+            password=SUPABASE_PASSWORD,
+            dbname=SUPABASE_DB,
+            port=SUPABASE_PORT,
+            sslmode='require',  # Required for Supabase
+        )
+        return conn
+    except Exception as e:
+        print(f"❌ Failed to connect to Supabase: {e}")
+        print("   Make sure the credentials are correct and the host is reachable.")
+        print(f"   Host: {SUPABASE_HOST}, Port: {SUPABASE_PORT}")
+        sys.exit(1)
+
 
 def ensure_tenant_exists():
     """Insert test tenant if not exists."""
-    conn = sqlite3.connect("quantiquan.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM tenants WHERE id = ?", (TENANT_ID,))
+    cursor.execute("DELETE FROM tenants WHERE id = %s", (TENANT_ID,))
     cursor.execute("""
         INSERT INTO tenants (id, name, plan)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
     """, (TENANT_ID, "Test Tenant", "free"))
     conn.commit()
+    cursor.close()
     conn.close()
     print(f"✅ Tenant ready: {TENANT_ID}")
 
@@ -43,15 +77,15 @@ def ensure_tenant_exists():
 def ensure_asset_exists():
     """Insert test asset if not exists."""
     ensure_tenant_exists()
-    conn = sqlite3.connect("quantiquan.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM assets WHERE id = ?", (ASSET_ID,))
+    cursor.execute("DELETE FROM assets WHERE id = %s", (ASSET_ID,))
     cursor.execute("""
         INSERT INTO assets (
             id, tenant_id, name, asset_type, importance_tier, owner_id,
             data_classification, compliance_scopes, exposure, is_production,
             downstream_dependents, revenue_impact
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         ASSET_ID,
         TENANT_ID,
@@ -62,11 +96,12 @@ def ensure_asset_exists():
         "regulated",
         '["pci"]',
         "customer-facing",
-        1,
+        True,
         15,
         "high"
     ))
     conn.commit()
+    cursor.close()
     conn.close()
     print(f"✅ Asset ready: {ASSET_ID}")
 

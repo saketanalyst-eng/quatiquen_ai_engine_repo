@@ -2,8 +2,9 @@
 
 from typing import Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from src.core.config.settings import get_settings
 from src.core.exceptions.infrastructure import DatabaseError
 from src.core.logging.logger import get_logger
 from src.domain.repositories import IDecisionRepository, IFindingRepository, IUnitOfWork
@@ -11,6 +12,49 @@ from src.infrastructure.persistence.repositories import DecisionRepository, Find
 from src.infrastructure.persistence.repositories.asset_repo import AssetRepository
 
 logger = get_logger("quantiquan.infrastructure.unit_of_work")
+
+
+# --- NEW P0.3: Factory function to create a dynamic session factory ---
+def create_session_factory() -> async_sessionmaker:
+    """Create an async session factory with dynamic database configuration.
+    
+    This factory reads the settings and creates the appropriate engine:
+    - For 'test' environment with Supabase credentials → PostgreSQL + asyncpg
+    - For all other environments → SQLite + aiosqlite (or the configured URL)
+    
+    Returns:
+        async_sessionmaker: Configured session factory for the UnitOfWork.
+    """
+    settings = get_settings()
+    
+    # Get the dynamic database URL (handles Supabase for test environment)
+    database_url = settings.get_database_url()
+    
+    # Determine if we're using PostgreSQL (for connection pool settings)
+    is_postgres = "postgresql" in database_url
+    
+    # Create the async engine with appropriate pool settings
+    engine = create_async_engine(
+        database_url,
+        echo=(settings.environment == "development"),
+        pool_size=10 if is_postgres else 1,
+        max_overflow=20 if is_postgres else 0,
+        pool_pre_ping=True if is_postgres else False,
+    )
+    
+    logger.info(
+        "Database engine created",
+        environment=settings.environment,
+        is_postgres=is_postgres,
+        pool_size=10 if is_postgres else 1,
+    )
+    
+    return async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
 
 
 class UnitOfWork(IUnitOfWork):

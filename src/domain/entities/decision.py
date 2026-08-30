@@ -27,6 +27,9 @@ class Decision:
         summary: Optional AI-generated business summary.
         computed_at: Timestamp when decision was computed.
         version: Version of the scoring formula used.
+        job_id: Queue job execution identity (for idempotency).
+        trace_id: End-to-end request/processing trace.
+        knowledge_version: Version of the knowledge/rules used.
     """
 
     finding_id: UUID
@@ -39,6 +42,11 @@ class Decision:
     summary: Optional[str]
     computed_at: int
     version: str
+    
+    # NEW PRODUCTION HARDENING FIELDS (P0 & P1)
+    job_id: UUID
+    trace_id: UUID
+    knowledge_version: str
 
     def __post_init__(self) -> None:
         """Validate decision invariants."""
@@ -97,9 +105,12 @@ class Decision:
         tier: PriorityTier,
         confidence: Confidence,
         drivers: Drivers,
+        job_id: UUID,  # NEW required parameter
+        trace_id: UUID,  # NEW required parameter
         recommendation_id: Optional[UUID] = None,
         summary: Optional[str] = None,
         version: str = "1.0.0",
+        knowledge_version: str = "1.0.0",  # NEW parameter with default
     ) -> "Decision":
         """Factory method to create a decision.
 
@@ -110,9 +121,12 @@ class Decision:
             tier: Priority tier.
             confidence: Confidence score.
             drivers: Scoring drivers.
+            job_id: Queue job identity (for idempotency).
+            trace_id: End-to-end trace identity.
             recommendation_id: Optional recommendation ID.
             summary: Optional AI summary.
             version: Scoring version.
+            knowledge_version: Knowledge/rules version used.
 
         Returns:
             Decision: New decision instance.
@@ -129,4 +143,7 @@ class Decision:
             summary=summary,
             computed_at=computed_at,
             version=version,
+            job_id=job_id,
+            trace_id=trace_id,
+            knowledge_version=knowledge_version,
         )
