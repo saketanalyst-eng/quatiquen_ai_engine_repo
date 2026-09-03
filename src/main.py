@@ -1,5 +1,5 @@
 """FastAPI application entry point."""
-
+import os
 import contextlib
 from typing import AsyncGenerator, Optional
 
@@ -113,7 +113,7 @@ def cli() -> None:
     uvicorn.run(
         "src.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=int(os.environ.get("port",8000)),
         reload=settings.debug,
         log_level="info",
     )

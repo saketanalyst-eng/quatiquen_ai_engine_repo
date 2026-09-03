@@ -114,6 +114,8 @@ class AppSettings(BaseSettings):
         """Ensure database URL is provided and not empty."""
         if not value:
             raise ValueError("DATABASE_URL must be set")
+        if value.startswith("postgresql://"):
+            value = value.replace("postgresql://", "postgresql+asyncpg://",1)
         return value
 
     # PRESERVED: environment validator (added "test" to allowed list)

@@ -1,0 +1,27 @@
+databases:
+  - name: quantiquan-db
+    plan: free
+    databaseName: quantiquan
+    user: quantiquan
+
+services:
+  - type: web
+    name: quantiquan-ai-engine
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quantiquan-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENVIRONMENT
+        value: development
+      - key: DEBUG
+        value: "false"
+      - key: GROQ_API_KEY
+        sync: false
