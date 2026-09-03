@@ -16,6 +16,10 @@ asyncpg==0.29.0
 # Caching & Messaging
 redis==5.0.1
 
+# Authentication (used directly by src/core/security/jwt.py — was missing)
+PyJWT==2.8.0
+cryptography==41.0.7
+
 # Logging
 structlog==24.1.0
 
