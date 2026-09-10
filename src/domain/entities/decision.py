@@ -6,6 +6,7 @@ from uuid import UUID
 
 from src.core.constants.enums import PriorityTier
 from src.core.exceptions.domain import ValidationError
+from src.domain.entities.recommendation import Recommendation
 from src.domain.value_objects import Confidence, Drivers, RiskScore
 
 
@@ -30,6 +31,7 @@ class Decision:
         job_id: Queue job execution identity (for idempotency).
         trace_id: End-to-end request/processing trace.
         knowledge_version: Version of the knowledge/rules used.
+        recommendation: Optional full structured Recommendation object.
     """
 
     finding_id: UUID
@@ -47,6 +49,12 @@ class Decision:
     job_id: UUID
     trace_id: UUID
     knowledge_version: str
+
+    # NEW: structured recommendation object (optional, backward compatible).
+    # recommendation_id above is preserved unchanged for existing callers;
+    # this carries the full Recommendation entity so the mapper can persist
+    # and the API can return real structured data instead of placeholders.
+    recommendation: Optional[Recommendation] = None
 
     def __post_init__(self) -> None:
         """Validate decision invariants."""
@@ -84,7 +92,7 @@ class Decision:
     @property
     def has_recommendation(self) -> bool:
         """Check if a recommendation is attached."""
-        return self.recommendation_id is not None
+        return self.recommendation_id is not None or self.recommendation is not None
 
     @property
     def has_summary(self) -> bool:
@@ -111,6 +119,7 @@ class Decision:
         summary: Optional[str] = None,
         version: str = "1.0.0",
         knowledge_version: str = "1.0.0",  # NEW parameter with default
+        recommendation: Optional[Recommendation] = None,  # NEW optional parameter
     ) -> "Decision":
         """Factory method to create a decision.
 
@@ -127,6 +136,7 @@ class Decision:
             summary: Optional AI summary.
             version: Scoring version.
             knowledge_version: Knowledge/rules version used.
+            recommendation: Optional full structured Recommendation object.
 
         Returns:
             Decision: New decision instance.
@@ -146,4 +156,5 @@ class Decision:
             job_id=job_id,
             trace_id=trace_id,
             knowledge_version=knowledge_version,
+            recommendation=recommendation,
         )

@@ -10,7 +10,7 @@ from src.core.config.settings import get_settings
 from src.core.constants.enums import PriorityTier
 from src.core.exceptions.application import PipelineInterruptionError, UseCaseError
 from src.core.logging.logger import get_logger
-from src.domain.entities import Decision, Finding
+from src.domain.entities import Decision, Finding, Recommendation
 from src.domain.repositories import IUnitOfWork
 from src.domain.services import ScoringEngine
 from src.domain.value_objects import BusinessContext, Confidence, Drivers, RiskScore, ThreatContext
@@ -76,6 +76,7 @@ class EvaluateFindingUseCase:
                 DecisionObject,
                 DriverExplanation,
                 DriversResponse,
+                RecommendationResponse,
                 StructuredSummary,
             )
 
@@ -129,7 +130,7 @@ class EvaluateFindingUseCase:
 
             tier = self.scoring_engine.get_tier(risk_score.final_bis)
 
-            recommendation_id = await self._generate_recommendation(
+            recommendation_obj = await self._generate_recommendation(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
                 risk_score=risk_score,
@@ -137,6 +138,7 @@ class EvaluateFindingUseCase:
                 tier=tier,
                 category=self._infer_category(finding),
             )
+            recommendation_id = recommendation_obj.id if recommendation_obj else None
 
             summary_obj = await self._generate_summary(
                 finding=finding,
@@ -210,6 +212,7 @@ class EvaluateFindingUseCase:
                 job_id=uuid4(),                # <-- Added
                 trace_id=uuid4(),              # <-- Added
                 knowledge_version="1.0.0",     # <-- Added
+                recommendation=recommendation_obj,  # <-- NEW: full structured object
             )
 
             async with self.uow:
@@ -225,6 +228,19 @@ class EvaluateFindingUseCase:
             settings = get_settings()
             engine_version = settings.app_version
             model_version = settings.groq_model
+
+            recommendation_response = None
+            if recommendation_obj is not None:
+                recommendation_response = RecommendationResponse(
+                    id=recommendation_obj.id,
+                    technical_text=recommendation_obj.technical_text,
+                    business_explanation=recommendation_obj.business_explanation,
+                    estimated_effort=recommendation_obj.estimated_effort,
+                    estimated_impact=recommendation_obj.estimated_impact,
+                    risk_reduction_potential=recommendation_obj.risk_reduction_potential,
+                    priority=recommendation_obj.priority,
+                    category=recommendation_obj.category,
+                )
 
             decision_object = DecisionObject(
                 decision_id=decision_id,
@@ -243,6 +259,7 @@ class EvaluateFindingUseCase:
                 reason=reason,
                 drivers=drivers_response,
                 summary=summary_obj,
+                recommendation=recommendation_response,  # <-- NEW
                 computed_at=decision_timestamp,
                 engine_version=engine_version,
                 model_version=model_version,
@@ -320,8 +337,64 @@ class EvaluateFindingUseCase:
         drivers: Drivers,
         tier: str,
         category: str,
-    ) -> Optional[UUID]:
-        return None
+    ) -> Optional[Recommendation]:
+        """Generate a structured remediation recommendation.
+
+        Deterministic and template-based, keyed on `category` and `tier`, so
+        it never depends on the LLM provider chain (which _generate_summary
+        already handles separately and can fail independently). Effort,
+        impact, and risk-reduction estimates are derived from the same
+        scoring inputs already computed for this finding, so this stays in
+        sync with the actual risk score rather than using fixed placeholders.
+        """
+        templates = {
+            "vulnerability": (
+                "Apply the vendor patch or upgrade the affected component to a "
+                "non-vulnerable version. If patching must be delayed, apply "
+                "compensating controls (WAF rule, network segmentation, or "
+                "disabling the affected feature) and re-scan to confirm "
+                "remediation."
+            ),
+            "general": (
+                "Investigate the finding to identify the root cause, remediate "
+                "the underlying issue, and re-scan the asset to verify the fix."
+            ),
+        }
+        technical_text = templates.get(category, templates["general"])
+
+        effort_by_tier = {
+            "Critical": "high",
+            "High": "medium",
+            "Medium": "low",
+            "Low": "low",
+        }
+        estimated_effort = effort_by_tier.get(tier, "medium")
+
+        estimated_impact = int(round(min(100.0, max(0.0, risk_score.final_bis))))
+        risk_reduction_potential = round(min(100.0, drivers.exploitability * 0.5 + 10), 2)
+
+        try:
+            tier_enum = PriorityTier(tier)
+            priority_value = PriorityMapping.get_priority(tier_enum)
+            priority_str = priority_value.value if hasattr(priority_value, "value") else str(priority_value)
+        except Exception:
+            priority_str = tier
+
+        now = int(time.time())
+        return Recommendation(
+            id=uuid4(),
+            finding_id=finding_id,
+            tenant_id=tenant_id,
+            technical_text=technical_text,
+            business_explanation=None,
+            estimated_effort=estimated_effort,
+            estimated_impact=estimated_impact,
+            risk_reduction_potential=risk_reduction_potential,
+            priority=priority_str,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
 
     def _infer_category(self, finding: Finding) -> str:
         return "vulnerability" if finding.has_cve else "general"

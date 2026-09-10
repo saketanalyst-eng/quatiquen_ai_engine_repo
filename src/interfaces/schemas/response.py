@@ -27,6 +27,20 @@ class StructuredSummary(BaseModel):
     expected_business_impact: str = Field(..., description="Consequences if no action is taken")
 
 
+# ---- Structured Recommendation (NEW) ----
+class RecommendationResponse(BaseModel):
+    """Structured remediation recommendation."""
+
+    id: UUID = Field(..., description="Recommendation identifier")
+    technical_text: str = Field(..., description="Technical remediation steps")
+    business_explanation: Optional[str] = Field(None, description="Business-focused explanation")
+    estimated_effort: str = Field(..., description="Estimated effort to fix (low/medium/high)")
+    estimated_impact: int = Field(..., description="Estimated impact score (0-100)")
+    risk_reduction_potential: float = Field(..., description="Potential risk score reduction after remediation")
+    priority: str = Field(..., description="Priority tier (based on finding)")
+    category: str = Field(..., description="Finding category used for template matching")
+
+
 # ---- Driver Explanation ----
 class DriverExplanation(BaseModel):
     """Driver value with a human-readable explanation."""
@@ -73,6 +87,12 @@ class DecisionObject(BaseModel):
     # Drivers and summary
     drivers: DriversResponse = Field(..., description="Driver breakdown with explanations")
     summary: Optional[StructuredSummary] = Field(None, description="AI-generated structured summary")
+
+    # NEW: structured recommendation (nullable — a missing recommendation is
+    # not an error; core scoring above remains fully valid on its own)
+    recommendation: Optional[RecommendationResponse] = Field(
+        None, description="Structured remediation recommendation"
+    )
 
     # Metadata
     computed_at: int = Field(..., description="Timestamp when decision was created")

@@ -98,6 +98,44 @@ class AssetMapper:
         )
 
 
+class RecommendationMapper:
+    """Mapper for Recommendation entity (NEW)."""
+
+    @staticmethod
+    def to_domain(model: RecommendationModel) -> Recommendation:
+        """Convert ORM model to domain entity."""
+        return Recommendation(
+            id=UUID(model.id),
+            finding_id=UUID(model.finding_id),
+            tenant_id=UUID(model.tenant_id),
+            technical_text=model.technical_text,
+            business_explanation=model.business_explanation,
+            estimated_effort=model.estimated_effort,
+            estimated_impact=model.estimated_impact,
+            risk_reduction_potential=model.risk_reduction_potential,
+            priority=model.priority,
+            category=model.category,
+            created_at=int(model.created_at.timestamp()),
+            updated_at=int(model.updated_at.timestamp()),
+        )
+
+    @staticmethod
+    def to_model(entity: Recommendation) -> RecommendationModel:
+        """Convert domain entity to ORM model."""
+        return RecommendationModel(
+            id=str(entity.id),
+            finding_id=str(entity.finding_id),
+            tenant_id=str(entity.tenant_id),
+            technical_text=entity.technical_text,
+            business_explanation=entity.business_explanation,
+            estimated_effort=entity.estimated_effort,
+            estimated_impact=entity.estimated_impact,
+            risk_reduction_potential=entity.risk_reduction_potential,
+            priority=entity.priority,
+            category=entity.category,
+        )
+
+
 class DecisionMapper:
     """Mapper for Decision aggregate and related models."""
 
@@ -128,6 +166,11 @@ class DecisionMapper:
 
         confidence = Confidence(value=decision_model.confidence, deductions=())
 
+        # NEW: build the full structured Recommendation entity (if present),
+        # in addition to the existing recommendation_id/summary fields below,
+        # which are left completely unchanged for backward compatibility.
+        recommendation_obj = RecommendationMapper.to_domain(rec_model) if rec_model else None
+
         return Decision(
             finding_id=UUID(decision_model.finding_id),
             tenant_id=UUID(decision_model.tenant_id),
@@ -142,6 +185,7 @@ class DecisionMapper:
             job_id=UUID(decision_model.job_id),                     # <-- ADDED
             trace_id=UUID(decision_model.trace_id),                 # <-- ADDED
             knowledge_version=decision_model.knowledge_version,     # <-- ADDED
+            recommendation=recommendation_obj,                      # <-- NEW
         )
 
     @staticmethod
@@ -178,8 +222,16 @@ class DecisionMapper:
             )
 
         # Recommendation
+        # NEW: if a full structured Recommendation object is attached, use its
+        # real fields via RecommendationMapper instead of the old hardcoded
+        # placeholders. The original placeholder path is preserved as a
+        # fallback for any caller that still only sets recommendation_id
+        # without the full object (e.g. recalculate.py carrying forward an
+        # old id), so nothing that worked before breaks.
         rec_model = None
-        if decision.recommendation_id:
+        if decision.recommendation is not None:
+            rec_model = RecommendationMapper.to_model(decision.recommendation)
+        elif decision.recommendation_id:
             rec_model = RecommendationModel(
                 id=str(decision.recommendation_id),
                 finding_id=str(decision.finding_id),
