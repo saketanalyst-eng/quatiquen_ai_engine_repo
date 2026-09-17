@@ -121,7 +121,7 @@ class EvaluateFindingUseCase:
 
             risk_score, drivers, confidence = self.scoring_engine.score_finding(
                 business_context=business_context,
-                threat_context=threat_context or ThreatContext.create(cve_id="") if threat_context else ThreatContext.create(cve_id=""),
+                threat_context=threat_context ,
                 vulnerability_severity=vulnerability_severity,
                 is_stale=is_stale,
                 source_count=source_count,

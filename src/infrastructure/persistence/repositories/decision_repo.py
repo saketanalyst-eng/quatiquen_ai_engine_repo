@@ -3,7 +3,7 @@
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select, func
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,10 +24,23 @@ class DecisionRepository(IDecisionRepository):
         self.session = session
 
     async def get_by_finding_id(self, finding_id: UUID, tenant_id: UUID) -> Optional[Decision]:
+        """
+        Retrieve the LATEST decision for a finding.
+
+        The risk_scores table accumulates one row per recalculation
+        (each call uses a new job_id), so we must explicitly pick the newest
+        row. Using scalar_one_or_none() would raise MultipleResultsFound
+        once history exists.
+        """
         try:
-            stmt = select(DecisionModel).where(
-                DecisionModel.finding_id == str(finding_id),
-                DecisionModel.tenant_id == str(tenant_id),
+            stmt = (
+                select(DecisionModel)
+                .where(
+                    DecisionModel.finding_id == str(finding_id),
+                    DecisionModel.tenant_id == str(tenant_id),
+                )
+                .order_by(DecisionModel.created_at.desc())
+                .limit(1)
             )
             result = await self.session.execute(stmt)
             decision_model = result.scalar_one_or_none()
@@ -47,12 +60,69 @@ class DecisionRepository(IDecisionRepository):
             logger.error("Failed to get decision", finding_id=str(finding_id), error=str(exc), exc_info=True)
             raise DatabaseError(f"Failed to get decision: {exc}", operation="get_by_finding_id") from exc
 
+    async def get_history_by_finding_id(
+        self,
+        finding_id: UUID,
+        tenant_id: UUID,
+        limit: int = 50,
+    ) -> list[Decision]:
+        """
+        Return the full risk / decision history for a finding, newest first.
+
+        Each row corresponds to one recalculation (a distinct job_id).
+        Historical rows are immutable — never overwritten or deleted.
+        """
+        try:
+            stmt = (
+                select(DecisionModel)
+                .where(
+                    DecisionModel.finding_id == str(finding_id),
+                    DecisionModel.tenant_id == str(tenant_id),
+                )
+                .order_by(DecisionModel.created_at.desc())
+                .limit(limit)
+            )
+            result = await self.session.execute(stmt)
+            models = result.scalars().all()
+
+            decisions: list[Decision] = []
+            for dm in models:
+                stmt2 = select(ScoreDriversModel).where(ScoreDriversModel.risk_score_id == dm.id)
+                result2 = await self.session.execute(stmt2)
+                drivers = result2.scalars().all()
+
+                stmt3 = select(RecommendationModel).where(RecommendationModel.finding_id == dm.finding_id)
+                result3 = await self.session.execute(stmt3)
+                rec = result3.scalar_one_or_none()
+
+                decisions.append(DecisionMapper.to_domain(dm, drivers, rec))
+            return decisions
+        except Exception as exc:
+            logger.error(
+                "Failed to get decision history",
+                finding_id=str(finding_id),
+                tenant_id=str(tenant_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            raise DatabaseError(
+                f"Failed to get decision history: {exc}",
+                operation="get_history_by_finding_id",
+            ) from exc
+
     async def save(self, decision: Decision) -> None:
         """
         Save a decision using PostgreSQL UPSERT (Idempotency).
-        
+
         If a decision with the same (finding_id, job_id) already exists,
         this updates it instead of creating a duplicate.
+
+        Behaviour under the new idempotency model:
+          • Each recalculation uses a NEW job_id (set by the use case),
+            so this INSERT creates a fresh history row.
+          • Retries of the SAME job_id (e.g., queue retry) update the
+            existing row instead of duplicating.
+          • Historical rows are never deleted.
         """
         try:
             # 1. Convert decision to models
@@ -70,55 +140,59 @@ class DecisionRepository(IDecisionRepository):
             # 4. Prepare the data dict for the UPSERT
             #    created_at and updated_at are omitted so the DB uses server_default
             model_dict = {
-                'id': decision_model.id,
-                'finding_id': decision_model.finding_id,
-                'tenant_id': decision_model.tenant_id,
-                'job_id': decision_model.job_id,
-                'trace_id': decision_model.trace_id,
-                'knowledge_version': decision_model.knowledge_version,
-                'bis': decision_model.bis,
-                'tier': decision_model.tier,
-                'confidence': decision_model.confidence,
-                'computed_at': decision_model.computed_at,
-                'version': decision_model.version,
-                # created_at and updated_at are removed – DB defaults will apply
+                "id": decision_model.id,
+                "finding_id": decision_model.finding_id,
+                "tenant_id": decision_model.tenant_id,
+                "job_id": decision_model.job_id,
+                "trace_id": decision_model.trace_id,
+                "knowledge_version": decision_model.knowledge_version,
+                "bis": decision_model.bis,
+                "tier": decision_model.tier,
+                "confidence": decision_model.confidence,
+                "computed_at": decision_model.computed_at,
+                "version": decision_model.version,
+                # created_at and updated_at omitted – DB defaults will apply
             }
 
             # 5. PostgreSQL UPSERT: ON CONFLICT (finding_id, job_id) DO UPDATE
             stmt = insert(DecisionModel).values(**model_dict)
             stmt = stmt.on_conflict_do_update(
-                constraint='uq_risk_scores_finding_job',
+                constraint="uq_risk_scores_finding_job",
                 set_={
-                    'tenant_id': stmt.excluded.tenant_id,
-                    'bis': stmt.excluded.bis,
-                    'tier': stmt.excluded.tier,
-                    'confidence': stmt.excluded.confidence,
-                    'computed_at': stmt.excluded.computed_at,
-                    'version': stmt.excluded.version,
-                    'trace_id': stmt.excluded.trace_id,
-                    'knowledge_version': stmt.excluded.knowledge_version,
-                    'updated_at': func.now(),  # Always update timestamp on conflict
-                }
+                    "tenant_id": stmt.excluded.tenant_id,
+                    "bis": stmt.excluded.bis,
+                    "tier": stmt.excluded.tier,
+                    "confidence": stmt.excluded.confidence,
+                    "computed_at": stmt.excluded.computed_at,
+                    "version": stmt.excluded.version,
+                    "trace_id": stmt.excluded.trace_id,
+                    "knowledge_version": stmt.excluded.knowledge_version,
+                    "updated_at": func.now(),
+                },
             ).returning(DecisionModel.id)
 
             # Execute the UPSERT and retrieve the final decision ID
             result = await self.session.execute(stmt)
             decision_id = result.scalar_one()
 
-            # 6. Clean up old drivers and recommendation for this decision
+            # 6. Clean up old drivers for THIS decision row only
+            #    (safe because decision_id is the current row)
             await self.session.execute(
                 delete(ScoreDriversModel).where(ScoreDriversModel.risk_score_id == decision_id)
             )
+
+            # 7. Recommendation is current-state only — one row per finding
+            #    (delete + re-insert so it reflects the latest recalculation)
             await self.session.execute(
                 delete(RecommendationModel).where(RecommendationModel.finding_id == decision_model.finding_id)
             )
 
-            # 7. Add the new drivers
+            # 8. Add the new drivers
             for dm in driver_models:
                 dm.risk_score_id = decision_id
                 self.session.add(dm)
 
-            # 8. Add the new recommendation (if it exists)
+            # 9. Add the new recommendation (if it exists)
             if rec_model:
                 rec_model.finding_id = decision_model.finding_id
                 self.session.add(rec_model)
