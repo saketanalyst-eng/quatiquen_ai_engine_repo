@@ -140,4 +140,6 @@ def get_recalculate_use_case(
     return RecalculateUseCase(
         unit_of_work=uow,
         threat_intel_port=threat_intel,
+        finding_repository=uow.finding_repository,
+        decision_repository=uow.decision_repository,
     )

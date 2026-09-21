@@ -46,8 +46,8 @@ class AssetRepository(IAssetRepository):
         """Get business context for an asset."""
         try:
             stmt = select(AssetModel).where(
-                AssetModel.id == asset_id,
-                AssetModel.tenant_id == tenant_id,
+                AssetModel.id == str(asset_id),
+                AssetModel.tenant_id == str(tenant_id),
             )
             result = await self.session.execute(stmt)
             model = result.scalar_one_or_none()

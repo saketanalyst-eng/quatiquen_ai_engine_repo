@@ -2,8 +2,10 @@
 
 import time
 from typing import Optional
+from uuid import uuid4
 
 from src.application.dto import RecalculateRequest, RecalculateResponse
+from src.core.constants.enums import ComplianceScope, DataSensitivity, ExposureLevel
 from src.core.constants.enums import PriorityTier
 from src.core.exceptions.application import PipelineInterruptionError, UseCaseError
 from src.core.exceptions.domain import EntityNotFoundError
@@ -84,11 +86,24 @@ class RecalculateUseCase:
                 finding.asset_id,
                 finding.tenant_id,
             )
+
+            # --- Neutral default uses ENUMS (matches AssetMapper), never crashes ---
             if business_context is None:
-                raise PipelineInterruptionError(
-                    "Business context not found",
-                    stage="recalculate",
+                logger.warning(
+                    "Business context not found – using neutral default",
                     finding_id=str(finding.id),
+                    asset_id=str(finding.asset_id),
+                )
+                business_context = BusinessContext(
+                    asset_id=finding.asset_id,
+                    importance_tier=50,
+                    owner_id=None,
+                    data_classification=DataSensitivity.INTERNAL,
+                    compliance_scopes=[],
+                    exposure=ExposureLevel.INTERNAL_ONLY,
+                    is_production=False,
+                    downstream_dependents=0,
+                    revenue_impact="none",
                 )
 
             # 3. Fetch threat context (if CVE exists)
@@ -106,7 +121,7 @@ class RecalculateUseCase:
 
             risk_score, drivers, confidence = self.scoring_engine.score_finding(
                 business_context=business_context,
-                threat_context=threat_context or ThreatContext.create(cve_id="") if threat_context else ThreatContext.create(cve_id=""),
+                threat_context=threat_context,   # may be None — engine handles it
                 vulnerability_severity=vulnerability_severity,
                 is_stale=is_stale,
                 source_count=source_count,
@@ -115,7 +130,7 @@ class RecalculateUseCase:
 
             tier = self.scoring_engine.get_tier(risk_score.final_bis)
 
-            # 5. Create new decision
+            # 5. Create new decision (fresh job_id/trace_id per recalculation → new history row)
             new_decision = Decision.create(
                 finding_id=finding.id,
                 tenant_id=finding.tenant_id,
@@ -126,6 +141,9 @@ class RecalculateUseCase:
                 recommendation_id=old_decision.recommendation_id,
                 summary=old_decision.summary,  # Keep existing summary
                 version="1.0.0",
+                job_id=uuid4(),
+                trace_id=uuid4(),
+                knowledge_version="1.0.0",
             )
 
             # 6. Persist in transaction
@@ -151,7 +169,7 @@ class RecalculateUseCase:
                 summary=new_decision.summary,
                 computed_at=new_decision.computed_at,
                 previous_bis=old_decision.bis,
-                previous_tier=old_decision.tier.value,
+                previous_tier=str(old_decision.tier),
             )
 
         except (EntityNotFoundError, PipelineInterruptionError):

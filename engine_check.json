@@ -1,0 +1,85 @@
+{
+  "info": {
+    "name": "QUANTIQUAN AI Engine - Render",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://quatiquen-ai-engine-repo.onrender.com/api/v1" },
+    { "key": "tenant_id", "value": "11111111111111111111111111111111" },
+    { "key": "asset_id", "value": "22222222222222222222222222222222" },
+    { "key": "finding_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/health" }
+      }
+    },
+    {
+      "name": "A - First Request",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"source\": \"internal_scanner\",\n  \"source_finding_id\": \"scan-postman-001\",\n  \"title\": \"Critical vulnerability in payment API\",\n  \"description\": \"Unpatched RCE vulnerability in payment gateway\",\n  \"raw_severity\": 8.5,\n  \"raw_severity_scale\": \"cvss_v3\",\n  \"detected_at\": 1690000000,\n  \"raw_payload\": { \"scanner\": \"postman\" },\n  \"cve_id\": \"CVE-2024-12345\",\n  \"status\": \"open\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/risk/calculate" }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "var d = pm.response.json();",
+            "if (d.finding_id) pm.collectionVariables.set('finding_id', d.finding_id);"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "B - Same Again",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"source\": \"internal_scanner\",\n  \"source_finding_id\": \"scan-postman-001\",\n  \"title\": \"Critical vulnerability in payment API\",\n  \"description\": \"Unpatched RCE vulnerability in payment gateway\",\n  \"raw_severity\": 8.5,\n  \"raw_severity_scale\": \"cvss_v3\",\n  \"detected_at\": 1690000000,\n  \"raw_payload\": { \"scanner\": \"postman\" },\n  \"cve_id\": \"CVE-2024-12345\",\n  \"status\": \"open\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/risk/calculate" }
+      }
+    },
+    {
+      "name": "C - Changed Severity",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"source\": \"internal_scanner\",\n  \"source_finding_id\": \"scan-postman-001\",\n  \"title\": \"Critical vulnerability in payment API\",\n  \"description\": \"Unpatched RCE vulnerability in payment gateway\",\n  \"raw_severity\": 9.8,\n  \"raw_severity_scale\": \"cvss_v3\",\n  \"detected_at\": 1690000000,\n  \"raw_payload\": { \"scanner\": \"postman\" },\n  \"cve_id\": \"CVE-2024-12345\",\n  \"status\": \"open\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/risk/calculate" }
+      }
+    },
+    {
+      "name": "D - Get Latest",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/risk/{{finding_id}}?tenant_id={{tenant_id}}" }
+      }
+    },
+    {
+      "name": "F - No CVE",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"asset_id\": \"{{asset_id}}\",\n  \"source\": \"internal_scanner\",\n  \"source_finding_id\": \"scan-postman-nocve-001\",\n  \"title\": \"Misconfiguration without CVE\",\n  \"description\": \"Public S3 bucket exposure\",\n  \"raw_severity\": 7.0,\n  \"raw_severity_scale\": \"cvss_v3\",\n  \"detected_at\": 1690000002,\n  \"raw_payload\": { \"scanner\": \"postman\" },\n  \"status\": \"open\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/risk/calculate" }
+      }
+    }
+  ]
+}

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from src.application.dto import EvaluateFindingRequest, GetDecisionRequest, RecalculateRequest
+from src.application.dto import EvaluateFindingRequest, GetDecisionRequest, RecalculateRequest,RecalculateResponse
 from src.application.use_cases import EvaluateFindingUseCase, GetDecisionUseCase, RecalculateUseCase
 from src.core.constants.enums import FindingSource, FindingStatus
 from src.core.exceptions.domain import EntityNotFoundError, ValidationError
@@ -119,13 +119,13 @@ async def get_decision(
 
 @router.post(
     "/risk/recalculate",
-    response_model=DecisionObject,  # ✅ Updated to DecisionObject
+    response_model=RecalculateResponse,  # ✅ Updated to RecalculateResponse
     status_code=status.HTTP_200_OK,
 )
 async def recalculate_risk(
     request: RecalculateRequestSchema,
     use_case: RecalculateUseCase = Depends(get_recalculate_use_case),
-) -> DecisionObject:  # ✅ Updated return type
+) -> RecalculateResponse:  # ✅ Updated return type
     """Recalculate risk for an existing finding.
 
     Args:

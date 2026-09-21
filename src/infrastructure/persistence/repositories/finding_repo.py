@@ -32,8 +32,8 @@ class FindingRepository(IFindingRepository):
         """Get a finding by ID."""
         try:
             stmt = select(FindingModel).where(
-                FindingModel.id == finding_id,
-                FindingModel.tenant_id == tenant_id,
+                FindingModel.id == str(finding_id),          # ← cast to str
+                FindingModel.tenant_id == str(tenant_id),    # ← cast to str
             )
             result = await self.session.execute(stmt)
             model = result.scalar_one_or_none()
@@ -153,8 +153,8 @@ class FindingRepository(IFindingRepository):
             stmt = (
                 update(FindingModel)
                 .where(
-                    FindingModel.id == finding.id,
-                    FindingModel.tenant_id == finding.tenant_id,
+                    FindingModel.id == str(finding.id),                 # ← cast to str
+                    FindingModel.tenant_id == str(finding.tenant_id),   # ← cast to str
                 )
                 .values(
                     status=finding.status.value,
@@ -170,8 +170,8 @@ class FindingRepository(IFindingRepository):
         """Get all open findings for an asset."""
         try:
             stmt = select(FindingModel).where(
-                FindingModel.asset_id == asset_id,
-                FindingModel.tenant_id == tenant_id,
+                FindingModel.asset_id == str(asset_id),          # ← cast to str
+                FindingModel.tenant_id == str(tenant_id),        # ← cast to str
                 FindingModel.status == "open",
             )
             result = await self.session.execute(stmt)

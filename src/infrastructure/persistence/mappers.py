@@ -14,6 +14,11 @@ from src.infrastructure.persistence.models import (
     ScoreDriversModel,
 )
 
+# Safe default used when a legacy recommendation row has empty technical_text.
+# The domain entity rejects empty text — this neutral placeholder satisfies
+# the invariant without inventing new facts.
+_DEFAULT_TECHNICAL_TEXT = "Investigate the finding and apply appropriate remediation steps"
+
 
 class FindingMapper:
     """Mapper for Finding entity."""
@@ -99,16 +104,22 @@ class AssetMapper:
 
 
 class RecommendationMapper:
-    """Mapper for Recommendation entity (NEW)."""
+    """Mapper for Recommendation entity."""
 
     @staticmethod
     def to_domain(model: RecommendationModel) -> Recommendation:
-        """Convert ORM model to domain entity."""
+        """Convert ORM model to domain entity.
+
+        Legacy rows may have empty `technical_text` (from older code paths).
+        The domain entity rejects empty text, so we coerce to a safe default
+        here rather than crashing on read.
+        """
         return Recommendation(
             id=UUID(model.id),
             finding_id=UUID(model.finding_id),
             tenant_id=UUID(model.tenant_id),
-            technical_text=model.technical_text,
+            # --- FIX: never pass empty string to domain entity ---
+            technical_text=(model.technical_text or _DEFAULT_TECHNICAL_TEXT),
             business_explanation=model.business_explanation,
             estimated_effort=model.estimated_effort,
             estimated_impact=model.estimated_impact,
@@ -166,7 +177,7 @@ class DecisionMapper:
 
         confidence = Confidence(value=decision_model.confidence, deductions=())
 
-        # NEW: build the full structured Recommendation entity (if present),
+        # Build the full structured Recommendation entity (if present),
         # in addition to the existing recommendation_id/summary fields below,
         # which are left completely unchanged for backward compatibility.
         recommendation_obj = RecommendationMapper.to_domain(rec_model) if rec_model else None
@@ -182,10 +193,10 @@ class DecisionMapper:
             summary=rec_model.business_explanation if rec_model else None,
             computed_at=decision_model.computed_at,
             version=decision_model.version,
-            job_id=UUID(decision_model.job_id),                     # <-- ADDED
-            trace_id=UUID(decision_model.trace_id),                 # <-- ADDED
-            knowledge_version=decision_model.knowledge_version,     # <-- ADDED
-            recommendation=recommendation_obj,                      # <-- NEW
+            job_id=UUID(decision_model.job_id),
+            trace_id=UUID(decision_model.trace_id),
+            knowledge_version=decision_model.knowledge_version,
+            recommendation=recommendation_obj,
         )
 
     @staticmethod
@@ -222,12 +233,10 @@ class DecisionMapper:
             )
 
         # Recommendation
-        # NEW: if a full structured Recommendation object is attached, use its
-        # real fields via RecommendationMapper instead of the old hardcoded
-        # placeholders. The original placeholder path is preserved as a
-        # fallback for any caller that still only sets recommendation_id
-        # without the full object (e.g. recalculate.py carrying forward an
-        # old id), so nothing that worked before breaks.
+        # If a full structured Recommendation object is attached, use its
+        # real fields via RecommendationMapper. Otherwise fall back to the
+        # legacy path — but NEVER write empty technical_text (the domain
+        # entity rejects it on read).
         rec_model = None
         if decision.recommendation is not None:
             rec_model = RecommendationMapper.to_model(decision.recommendation)
@@ -236,7 +245,8 @@ class DecisionMapper:
                 id=str(decision.recommendation_id),
                 finding_id=str(decision.finding_id),
                 tenant_id=str(decision.tenant_id),
-                technical_text="",
+                # --- FIX: never write empty string ---
+                technical_text=(decision.summary or _DEFAULT_TECHNICAL_TEXT),
                 business_explanation=decision.summary,
                 estimated_effort="medium",
                 estimated_impact=50,
