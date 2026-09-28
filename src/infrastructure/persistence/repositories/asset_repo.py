@@ -3,7 +3,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions.infrastructure import DatabaseError
@@ -29,11 +29,15 @@ class AssetRepository(IAssetRepository):
         self.session = session
 
     async def get_by_id(self, asset_id: UUID, tenant_id: UUID) -> Optional[Asset]:
-        """Get an asset by ID."""
+        """Get an asset by ID.
+
+        Casts both sides to text so the query works whether the DB column
+        is VARCHAR or UUID.
+        """
         try:
             stmt = select(AssetModel).where(
-                AssetModel.id == asset_id,
-                AssetModel.tenant_id == tenant_id,
+                cast(AssetModel.id, String) == str(asset_id),
+                cast(AssetModel.tenant_id, String) == str(tenant_id),
             )
             result = await self.session.execute(stmt)
             model = result.scalar_one_or_none()
@@ -43,11 +47,15 @@ class AssetRepository(IAssetRepository):
             raise DatabaseError(f"Failed to get asset: {exc}", operation="get_by_id") from exc
 
     async def get_business_context(self, asset_id: UUID, tenant_id: UUID) -> Optional[BusinessContext]:
-        """Get business context for an asset."""
+        """Get business context for an asset.
+
+        Casts both sides to text so the query works whether the DB column
+        is VARCHAR or UUID.
+        """
         try:
             stmt = select(AssetModel).where(
-                AssetModel.id == str(asset_id),
-                AssetModel.tenant_id == str(tenant_id),
+                cast(AssetModel.id, String) == str(asset_id),
+                cast(AssetModel.tenant_id, String) == str(tenant_id),
             )
             result = await self.session.execute(stmt)
             model = result.scalar_one_or_none()
