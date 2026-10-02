@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from src.application.dto import EvaluateFindingRequest, EvaluateFindingResponse
 from src.application.ports import CachePort, EventPort, LLMPort, ThreatIntelPort
 from src.core.config.settings import get_settings
-from src.core.constants.enums import PriorityTier
+from src.core.constants.enums import DataSensitivity, ExposureLevel, PriorityTier
 from src.core.exceptions.application import PipelineInterruptionError, UseCaseError
 from src.core.logging.logger import get_logger
 from src.domain.entities import Decision, Finding, Recommendation
@@ -96,15 +96,69 @@ class EvaluateFindingUseCase:
                 status=request.status,
             )
 
+            # ================================================================
+            # PASSIVE DISCOVERY + FALLBACK CHAIN
+            #
+            # 1. Try to fetch existing business context.
+            # 2. If asset doesn't exist → auto-create it with neutral defaults.
+            # 3. Re-fetch the context.
+            # 4. If auto-create fails (DB down, etc.) → use in-memory neutral
+            #    context so the pipeline still completes.
+            #
+            # The engine NEVER returns 500 for a missing asset. Missing
+            # business context reduces confidence — it never blocks scoring.
+            # ================================================================
             business_context = await self._get_business_context_isolated(
                 asset_id=finding.asset_id,
-                tenant_id=finding.tenant_id
+                tenant_id=finding.tenant_id,
             )
+
             if business_context is None:
-                raise PipelineInterruptionError(
-                    "Business context not found for asset",
-                    stage="context_builder",
+                logger.warning(
+                    "Unknown asset_id – auto-creating via passive discovery",
                     finding_id=str(finding.id),
+                    asset_id=str(finding.asset_id),
+                    tenant_id=str(finding.tenant_id),
+                )
+
+                try:
+                    async with self.uow:
+                        with self.uow.session.no_autoflush:
+                            await self.uow.asset_repository.create_if_missing(
+                                asset_id=finding.asset_id,
+                                tenant_id=finding.tenant_id,
+                            )
+                        await self.uow.commit()
+
+                    # Re-fetch after creation
+                    business_context = await self._get_business_context_isolated(
+                        asset_id=finding.asset_id,
+                        tenant_id=finding.tenant_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Asset auto-create failed – falling back to in-memory context",
+                        asset_id=str(finding.asset_id),
+                        error=str(exc),
+                    )
+
+            # ------- Final safety net: in-memory neutral context -------
+            if business_context is None:
+                logger.warning(
+                    "Using neutral in-memory BusinessContext – reduced confidence expected",
+                    finding_id=str(finding.id),
+                    asset_id=str(finding.asset_id),
+                )
+                business_context = BusinessContext(
+                    asset_id=finding.asset_id,
+                    importance_tier=50,
+                    owner_id=None,
+                    data_classification=DataSensitivity.INTERNAL,
+                    compliance_scopes=[],
+                    exposure=ExposureLevel.INTERNAL_ONLY,
+                    is_production=False,
+                    downstream_dependents=0,
+                    revenue_impact="none",
                 )
 
             threat_context = None
@@ -121,7 +175,7 @@ class EvaluateFindingUseCase:
 
             risk_score, drivers, confidence = self.scoring_engine.score_finding(
                 business_context=business_context,
-                threat_context=threat_context ,
+                threat_context=threat_context,
                 vulnerability_severity=vulnerability_severity,
                 is_stale=is_stale,
                 source_count=source_count,
@@ -209,10 +263,10 @@ class EvaluateFindingUseCase:
                 recommendation_id=recommendation_id,
                 summary=summary_str,
                 version="1.0.0",
-                job_id=uuid4(),                # <-- Added
-                trace_id=uuid4(),              # <-- Added
-                knowledge_version="1.0.0",     # <-- Added
-                recommendation=recommendation_obj,  # <-- NEW: full structured object
+                job_id=uuid4(),
+                trace_id=uuid4(),
+                knowledge_version="1.0.0",
+                recommendation=recommendation_obj,
             )
 
             async with self.uow:
@@ -259,7 +313,7 @@ class EvaluateFindingUseCase:
                 reason=reason,
                 drivers=drivers_response,
                 summary=summary_obj,
-                recommendation=recommendation_response,  # <-- NEW
+                recommendation=recommendation_response,
                 computed_at=decision_timestamp,
                 engine_version=engine_version,
                 model_version=model_version,

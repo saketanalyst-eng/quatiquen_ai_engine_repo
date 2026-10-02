@@ -218,7 +218,7 @@ def test_risk_calculation():
         "raw_severity_scale": "cvss_v3",
         "detected_at": 1690000000,
         "raw_payload": {"scanner": "test", "details": "Sample finding"},
-        "cve_id": "CVE-2024-12345",
+        "cve_id": "CVE-2021-44228",
         "status": "open",
     }
 
