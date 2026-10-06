@@ -4,7 +4,7 @@ This module contains pure functions for calculating Business Impact Score (BIS),
 confidence, and priority tiers as defined in Sections 7, 8, and 9 of the blueprint.
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 from src.core.constants.scoring_weights import (
     ASSET_IMPORTANCE_WEIGHT,
@@ -197,7 +197,7 @@ class ScoringEngine:
     @staticmethod
     def score_finding(
         business_context: BusinessContext,
-        threat_context: ThreatContext,
+        threat_context: Optional[ThreatContext],
         vulnerability_severity: float,
         is_stale: bool,
         source_count: int,
@@ -210,7 +210,12 @@ class ScoringEngine:
 
         Args:
             business_context: Business context for the asset.
-            threat_context: Threat context for the CVE.
+            threat_context: Optional threat context for the CVE. May be None
+                when the finding has no CVE, when threat intel is unavailable,
+                or when the CVE is unknown to EPSS/KEV. Missing threat intel
+                lowers confidence but never crashes the engine — we fall back
+                to a neutral exploitability score and treat the finding as
+                not-known-exploitable.
             vulnerability_severity: Normalized vulnerability severity (0-100).
             is_stale: Whether the finding is stale.
             source_count: Number of sources reporting the finding.
@@ -221,9 +226,20 @@ class ScoringEngine:
         """
         # Extract driver scores
         asset_importance = business_context.asset_importance_score
-        exploitability = threat_context.exploitability_score
         business_impact = business_context.business_impact_score
         exposure = business_context.exposure_score
+
+        # --- Null-safe threat context handling ---
+        # Threat context is optional. If missing (no CVE, unknown CVE, or
+        # threat intel provider failure), use neutral values. The confidence
+        # calculator will deduct for missing threat intel, so the score
+        # correctly reflects reduced certainty — nothing is fabricated.
+        if threat_context is not None:
+            exploitability = threat_context.exploitability_score
+            has_threat_intel = threat_context.is_exploitable
+        else:
+            exploitability = 50.0   # neutral midpoint of 0-100 scale
+            has_threat_intel = False
 
         # Calculate raw BIS
         raw_bis = ScoringEngine.calculate_raw_bis(
@@ -238,7 +254,7 @@ class ScoringEngine:
         confidence = ScoringEngine.calculate_confidence(
             has_owner=business_context.has_owner,
             is_stale=is_stale,
-            has_threat_intel=threat_context.is_exploitable,
+            has_threat_intel=has_threat_intel,
             has_cmdb_record=has_cmdb_record,
             source_count=source_count,
         )

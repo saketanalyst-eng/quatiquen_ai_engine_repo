@@ -84,8 +84,8 @@ class AssetRepository(IAssetRepository):
         """
         try:
             model_dict = {
-                "id": str(asset_id),
-                "tenant_id": str(tenant_id),
+                "id": asset_id,
+                "tenant_id": tenant_id,
                 "name": name or f"Auto-discovered asset {str(asset_id)[:8]}",
                 "asset_type": asset_type,
                 "importance_tier": 50,
